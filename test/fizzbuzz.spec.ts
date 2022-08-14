@@ -7,6 +7,8 @@ describe("fizzbuzzTest", () => {
     [3, "fizz"],
     [4, 4],
     [5, "buzz"],
+    [6, 6],
+    [15, "fizzbuzz"],
   ];
   cases.forEach((testCase) => {
     it(`fizz buzz${testCase}`, () => {
