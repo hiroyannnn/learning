@@ -1,3 +1,3 @@
 export const fizzbuzz = (n: number): number => {
-  return 0;
+  return n;
 };
