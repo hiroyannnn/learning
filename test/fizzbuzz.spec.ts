@@ -5,9 +5,11 @@ describe("fizzbuzzTest", () => {
     [1, 1],
     [2, 2],
     [3, "fizz"],
+    [4, 4],
+    [5, "buzz"],
   ];
   cases.forEach((testCase) => {
-    it(`fib${testCase}`, () => {
+    it(`fizz buzz${testCase}`, () => {
       expect(fizzbuzz(testCase[0])).toBe(testCase[1]);
     });
   });
