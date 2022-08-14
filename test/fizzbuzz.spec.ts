@@ -1,9 +1,10 @@
 import { fizzbuzz } from "../src/fizzbuzz";
 
 describe("fizzbuzzTest", () => {
-  const cases: Array<Array<number>> = [
+  const cases: Array<Array<number | string>> = [
     [1, 1],
     [2, 2],
+    [3, "fizz"],
   ];
   cases.forEach((testCase) => {
     it(`fib${testCase}`, () => {
