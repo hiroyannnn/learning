@@ -1,8 +1,8 @@
 import { Money } from "./Money";
 
 export class Sum implements Expression {
-  augend: Money | undefined;
-  addend: Money | undefined;
+  augend: Money;
+  addend: Money;
 
   constructor(augend: Money, addend: Money) {
     this.addend = addend;

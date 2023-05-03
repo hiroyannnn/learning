@@ -37,4 +37,11 @@ describe("Money", () => {
     expect(sum.augend).toStrictEqual(five);
     expect(sum.addend).toStrictEqual(five);
   });
+
+  test("reduce sum", () => {
+    const sum: Expression = new Sum(Money.dollar(3), Money.dollar(4));
+    const bank: Bank = new Bank();
+    const result: Money = bank.reduce(sum, "USD");
+    expect(result).toStrictEqual(Money.dollar(7));
+  });
 });
