@@ -1,3 +1,5 @@
+import { Dollar } from "./Money";
+
 describe("Money", () => {
   test("multiplication", () => {
     const five: Dollar = new Dollar(5);
