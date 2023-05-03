@@ -1,10 +1,10 @@
-- TODO: $5 + 10CHF = $10 (レートが 2:1 の場合)
-- TODO: $5 \*2 = $10
-- TODO: amount を private にする
-- TODO: dollar の副作用をどうする？
-- TODO: Money の丸め処理どうする？
+- [ ] TODO: $5 + 10CHF = $10 (レートが 2:1 の場合)
+- [ ] TODO: $5 \*2 = $10
+- [ ] TODO: amount を private にする
+- [ ] TODO: dollar の副作用をどうする？
+- [ ] TODO: Money の丸め処理どうする？
 -
-- Dollar クラスがない
-- コンストラクタがない
-- times メソッドがない
-- amount フィールドがない
+- [x] Dollar クラスがない
+- [ ] コンストラクタがない
+- [ ] times メソッドがない
+- [ ] amount フィールドがない
