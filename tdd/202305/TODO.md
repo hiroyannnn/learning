@@ -3,4 +3,4 @@
 - [ ] TODO: amount を private にする
 - [x] TODO: dollar の副作用をどうする？
 - [ ] TODO: Money の丸め処理どうする？
-- [-] TODO: equals()
+- [x] TODO: equals()
