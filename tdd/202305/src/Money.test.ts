@@ -51,4 +51,11 @@ describe("Money", () => {
     const result: Money = bank.reduce(Money.dollar(1), "USD");
     expect(result).toStrictEqual(Money.dollar(1));
   });
+
+  test("reduce money different currency", () => {
+    const bank: Bank = new Bank();
+    bank.addRate("CHF", "USD", 2);
+    const result: Money = bank.reduce(Money.franc(2), "USD");
+    expect(result).toStrictEqual(Money.dollar(1));
+  });
 });
