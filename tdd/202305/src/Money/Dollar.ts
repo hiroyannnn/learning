@@ -1,7 +1,8 @@
-export class Dollar {
-  private amount: number = 0;
+import { Money } from "./Money";
 
+export class Dollar extends Money {
   constructor(amount: number) {
+    super();
     this.amount = amount;
   }
 
