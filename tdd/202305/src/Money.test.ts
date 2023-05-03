@@ -44,4 +44,10 @@ describe("Money", () => {
     const result: Money = bank.reduce(sum, "USD");
     expect(result).toStrictEqual(Money.dollar(7));
   });
+
+  test("reduce money", () => {
+    const bank: Bank = new Bank();
+    const result: Money = bank.reduce(Money.dollar(1), "USD");
+    expect(result).toStrictEqual(Money.dollar(1));
+  });
 });
