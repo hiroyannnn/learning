@@ -11,6 +11,6 @@
 - [ ] Dollar と Franc の重複
 - [x] equals の一般化
 - [x] Dollar と Franc を比較する
-- [ ] times の一般化
+- [x] times の一般化
 - [x] 通貨の概念
 - [ ] multiplication Franc test を削除する？

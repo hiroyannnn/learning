@@ -1,3 +1,4 @@
+import { Franc } from "./Franc";
 import { Money } from "./Money";
 
 describe("Money", () => {
@@ -24,11 +25,11 @@ describe("Money", () => {
     expect(Money.franc(5).equals(Money.franc(6))).toBe(false);
     expect(Money.franc(5).equals(Money.dollar(5))).toBe(false);
   });
-});
-
-describe("Currency", () => {
   test("currency", () => {
     expect(Money.dollar(1).currency()).toBe("USD");
     expect(Money.franc(1).currency()).toBe("CHF");
+  });
+  test("different class equality", () => {
+    expect(new Money(10, "CHF").equals(new Franc(10, "CHF"))).toBe(true);
   });
 });
