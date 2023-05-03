@@ -3,8 +3,4 @@
 - [ ] TODO: amount を private にする
 - [x] TODO: dollar の副作用をどうする？
 - [ ] TODO: Money の丸め処理どうする？
--
-- [x] Dollar クラスがない
-- [x] コンストラクタがない
-- [x] times メソッドがない
-- [x] amount フィールドがない
+- [-] TODO: equals()
