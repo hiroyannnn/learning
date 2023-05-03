@@ -1,5 +1,6 @@
 import { Bank } from "./Bank";
 import { Money } from "./Money";
+import { Sum } from "./Sum";
 
 describe("Money", () => {
   describe("multiplication", () => {
@@ -27,5 +28,13 @@ describe("Money", () => {
     const bank: Bank = new Bank();
     const reduced: Money = bank.reduce(sum, "USD");
     expect(reduced).toStrictEqual(Money.dollar(10));
+  });
+
+  test("plus returns sum", () => {
+    const five: Money = Money.dollar(5);
+    const result: Expression = five.plus(five);
+    const sum: Sum = result as Sum;
+    expect(sum.augend).toStrictEqual(five);
+    expect(sum.addend).toStrictEqual(five);
   });
 });
