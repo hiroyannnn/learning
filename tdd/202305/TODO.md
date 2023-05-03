@@ -1,6 +1,6 @@
 - [ ] TODO: $5 + 10CHF = $10 (レートが 2:1 の場合)
 - [x] TODO: $5 \*2 = $10
-- [ ] TODO: amount を private にする
+- [x] TODO: amount を private にする
 - [x] TODO: dollar の副作用をどうする？
 - [ ] TODO: Money の丸め処理どうする？
 - [x] TODO: equals()
