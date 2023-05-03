@@ -3,6 +3,9 @@ export class Money {
 
   public equals(object: Object): boolean {
     const money: Money = object as Money;
-    return this.amount === money.amount;
+    return (
+      this.amount === money.amount &&
+      this.constructor.name === money.constructor.name
+    );
   }
 }

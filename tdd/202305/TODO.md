@@ -10,4 +10,5 @@
 - [x] 5CHF \* 2 = 10CHF
 - [ ] Dollar と Franc の重複
 - [x] equals の一般化
+- [x] Dollar と Franc を比較する
 - [ ] times の一般化
