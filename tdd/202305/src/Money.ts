@@ -1,7 +1,7 @@
 import { Sum } from "./Sum";
 
 export class Money implements Expression {
-  protected amount: number = 0;
+  public amount: number = 0;
   protected _currency: string = "";
 
   constructor(amount: number, currency: string) {
