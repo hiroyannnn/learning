@@ -12,3 +12,5 @@
 - [x] equals の一般化
 - [x] Dollar と Franc を比較する
 - [ ] times の一般化
+- [ ] 通貨の概念
+- [ ] multiplication Franc test を削除する？
