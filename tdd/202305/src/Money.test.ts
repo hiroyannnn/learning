@@ -1,4 +1,5 @@
 import { Bank } from "./Bank";
+import { Expression } from "./Expression";
 import { Money } from "./Money";
 import { Sum } from "./Sum";
 
