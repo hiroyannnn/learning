@@ -25,3 +25,10 @@ describe("Money", () => {
     expect(Money.franc(5).equals(Money.dollar(5))).toBe(false);
   });
 });
+
+describe("Currency", () => {
+  test("currency", () => {
+    expect(Money.dollar(1).currency()).toBe("USD");
+    expect(Money.franc(1).currency()).toBe("CHF");
+  });
+});

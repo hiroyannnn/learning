@@ -4,6 +4,7 @@ import { Franc } from "./Franc";
 export abstract class Money {
   protected amount: number = 0;
   abstract times(multiplier: number): Money;
+  abstract currency(): string;
 
   public equals(object: Object): boolean {
     const money: Money = object as Money;

@@ -6,6 +6,10 @@ export class Dollar extends Money {
     this.amount = amount;
   }
 
+  currency(): string {
+    return "USD";
+  }
+
   times(multiplier: number): Money {
     return new Dollar(this.amount * multiplier);
   }
