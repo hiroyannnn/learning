@@ -183,3 +183,4 @@ dist
 
 /dist
 
+redis/data/redis/dump.rdb

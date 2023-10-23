@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  amazon-linux-2:
+    build: .
+    container_name: amazon-linux-2
+    hostname: localhost
+    privileged: true
+    command: /sbin/init
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    ports:
+      - 20022:20022
