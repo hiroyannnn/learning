@@ -1,0 +1,21 @@
+import React,{ Component } from 'react';
+import {
+  View,
+  Button
+} from 'react-native';
+
+export default class App extends Component {
+  showWarning(){
+    alert('pressed!')
+  }
+  render(){
+    return(
+      <View>
+      <Button
+      onPress={()=> this.showWarning()}
+      title={'Press'}
+      />
+      </View>
+    );
+  }
+}

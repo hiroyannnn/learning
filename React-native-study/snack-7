@@ -1,0 +1,26 @@
+import React,{ Component } from 'react';
+import {
+  View,
+  Text,
+  FlatList
+} from 'react-native';
+
+export default class App extends Component {
+  render(){
+    const data=[
+      {str: 'Guido van Rossum',key:1},
+      {str:'MatsumotoYukihiro',key:2},
+      {str:'RasmusLerdorf',key:3}
+    ]
+    return(
+      <View style={{paddingTop:20}}>
+      <FlatList
+      data={data}
+      renderItem={({item})=>{
+        return <Text>{item.str}</Text>
+      }}
+      />
+      </View>
+    );
+  }
+}

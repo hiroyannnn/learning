@@ -1,0 +1,24 @@
+import React,{ Component } from 'react';
+import {
+  View,
+  Image,
+  TouchableOpacity
+} from 'react-native';
+
+export default class App extends Component {
+  render(){
+    return(
+      <View>
+      <TouchableOpacity onPress={()=> alert('pressed!')}>
+      <Image
+      style={{
+        width:64,
+        height:64
+      }}
+      source={{uri: 'https://facebook.github.io/react-native/img/favicon.png'}}
+      />
+      </TouchableOpacity>
+      </View>
+    );
+  }
+}
