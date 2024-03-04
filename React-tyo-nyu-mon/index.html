@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>
+            Hellow World
+        </title>
+        <script crossorigin src="https://unpkg.com/react@16/umd/react.production.min.js"></script>
+        <script crossorigin src="https://unpkg.com/react-dom@16/umd/react-dom.production.min.js"></script>
+    </head>
+    <body>
+        <div id="main"></div>
+        <script>
+        // コンポーネントの定義
+        class MyComponent extends React.Component{
+            render(){
+                return [
+                    <h1>hogehoge</h1>,
+                    <iunput type="text" size="10"/>
+                    ]
+            }
+        };
+        // コンポーネントの利用
+        ReactDOM.render(
+            React.createElement(MyComponent),
+            document.getElementById('main')
+        );
+        </script>
+        <style>
+            #main{
+            color:blue;
+            } 
+       </style>
+    </body>
+</html>
