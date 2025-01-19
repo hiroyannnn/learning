@@ -1,0 +1,16 @@
+
+eksctl create cluster \
+--vpc-public-subnets=subnet-091ac861c7223a3fa,subnet-0bf68756b8c16e951,subnet-01eba0f1ba58a11ba \
+--name eks-worker-cluster \
+--region ap-northeast-1 \
+--version 1.24 \
+--nodegroup-name eks-work-nodegroup \
+--node-type t2.small \
+--nodes 2 \
+--nodes-min 2 \
+--nodes-max 5
+
+
+eksctl delete cluster --region=ap-northeast-1 --name=eks-worker-cluster
+aws cloudformation delete-stack --stack-name eksctl-eks-worker-cluster-cluster --region ap-northeast-1
+
