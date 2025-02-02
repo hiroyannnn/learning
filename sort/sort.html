@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>ソートアルゴリズムのビジュアライゼーション</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #eef;
+      margin: 0;
+      padding: 0;
+    }
+    #controls {
+      text-align: center;
+      margin: 20px;
+    }
+    .algorithm-container {
+      width: 420px;
+      margin: 20px auto;
+      padding: 10px;
+      border: 1px solid #ddd;
+      background-color: #fff;
+      box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
+    }
+    .algorithm-container h2 {
+      margin: 0 0 10px;
+    }
+    .algorithm-container p {
+      font-size: 14px;
+      color: #555;
+      margin: 0 0 10px;
+    }
+    .container {
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      width: 400px;
+      height: 300px;
+      border: 1px solid #ccc;
+      margin: 10px auto;
+      background-color: #f9f9f9;
+    }
+    .bar {
+      background-color: steelblue;
+      margin: 0 1px;
+      display: inline-block;
+    }
+    .algorithm-container > div[id$="Status"] {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #333;
+      height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <!-- コントロール部 -->
+  <div id="controls">
+    <button id="startButton">ソート開始</button>
+  </div>
+
+  <!-- Merge Sort のエリア -->
+  <div class="algorithm-container">
+    <h2>Merge Sort</h2>
+    <p>
+      Merge Sortは、配列を再帰的に半分に分割し、ソートされた部分をマージすることで整列するアルゴリズムです。<br>
+      安定ソートで、計算量は O(n log n) です。
+    </p>
+    <div id="mergeSortContainer" class="container"></div>
+    <div id="mergeSortStatus">ステップ情報</div>
+  </div>
+
+  <!-- Quick Sort のエリア -->
+  <div class="algorithm-container">
+    <h2>Quick Sort</h2>
+    <p>
+      Quick Sortは、ピボットを選択し、ピボットより小さい要素と大きい要素に分割することで整列するアルゴリズムです。<br>
+      平均計算量は O(n log n) ですが、最悪の場合は O(n²) となります。
+    </p>
+    <div id="quickSortContainer" class="container"></div>
+    <div id="quickSortStatus">ステップ情報</div>
+  </div>
+
+  <!-- Bubble Sort のエリア -->
+  <div class="algorithm-container">
+    <h2>Bubble Sort</h2>
+    <p>
+      Bubble Sortは、隣接する要素を比較し、順序が逆の場合に交換することで整列するアルゴリズムです。<br>
+      単純ですが計算量は O(n²) のため、大きな配列には不向きです。
+    </p>
+    <div id="bubbleSortContainer" class="container"></div>
+    <div id="bubbleSortStatus">ステップ情報</div>
+  </div>
+
+  <!-- Insertion Sort のエリア -->
+  <div class="algorithm-container">
+    <h2>Insertion Sort</h2>
+    <p>
+      Insertion Sortは、未整列部分から要素を1つずつ取り出し、整列済み部分に適切な位置へ挿入するアルゴリズムです。<br>
+      最適な場合は O(n) ですが、最悪の場合は O(n²) となります。
+    </p>
+    <div id="insertionSortContainer" class="container"></div>
+    <div id="insertionSortStatus">ステップ情報</div>
+  </div>
+
+  <script>
+    // ビジュアライゼーションに用いるバーの数とアニメーションの遅延（ミリ秒）
+    const NUM_BARS = 50;
+    const delay = 50; // 数値を大きくすると動作がゆっくりになります
+
+    // 各アルゴリズムのステップカウンター
+    let mergeSortStep = 0, quickSortStep = 0, bubbleSortStep = 0, insertionSortStep = 0;
+
+    // 指定した時間だけ待つ Promise
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // 配列をバーで描画する関数
+    function drawArray(array, container) {
+      container.innerHTML = "";
+      let containerWidth = container.clientWidth;
+      let barWidth = containerWidth / array.length;
+      let maxVal = Math.max(...array);
+      for (let i = 0; i < array.length; i++) {
+        let bar = document.createElement("div");
+        bar.className = "bar";
+        bar.style.height = (array[i] / maxVal * 100) + "%";
+        bar.style.width = (barWidth - 2) + "px";
+        container.appendChild(bar);
+      }
+    }
+
+    // ステップ情報を更新する関数
+    function updateStatus(alg, text) {
+      if (alg === "merge") {
+        mergeSortStep++;
+        document.getElementById("mergeSortStatus").innerText = "Step " + mergeSortStep + ": " + text;
+      } else if (alg === "quick") {
+        quickSortStep++;
+        document.getElementById("quickSortStatus").innerText = "Step " + quickSortStep + ": " + text;
+      } else if (alg === "bubble") {
+        bubbleSortStep++;
+        document.getElementById("bubbleSortStatus").innerText = "Step " + bubbleSortStep + ": " + text;
+      } else if (alg === "insertion") {
+        insertionSortStep++;
+        document.getElementById("insertionSortStatus").innerText = "Step " + insertionSortStep + ": " + text;
+      }
+    }
+
+    // --- Merge Sort の実装 ---
+    async function mergeSort(arr, left, right, container) {
+      if (left >= right) return;
+      let mid = Math.floor((left + right) / 2);
+      await mergeSort(arr, left, mid, container);
+      await mergeSort(arr, mid + 1, right, container);
+      updateStatus("merge", "Merging subarrays: left=" + left + ", mid=" + mid + ", right=" + right);
+      await merge(arr, left, mid, right, container);
+    }
+
+    async function merge(arr, left, mid, right, container) {
+      let n1 = mid - left + 1;
+      let n2 = right - mid;
+      let leftArr = [];
+      let rightArr = [];
+      for (let i = 0; i < n1; i++) {
+        leftArr[i] = arr[left + i];
+      }
+      for (let j = 0; j < n2; j++) {
+        rightArr[j] = arr[mid + 1 + j];
+      }
+      let i = 0, j = 0, k = left;
+      while (i < n1 && j < n2) {
+        if (leftArr[i] <= rightArr[j]) {
+          arr[k] = leftArr[i];
+          updateStatus("merge", "Set index " + k + " to " + leftArr[i] + " from left subarray");
+          i++;
+        } else {
+          arr[k] = rightArr[j];
+          updateStatus("merge", "Set index " + k + " to " + rightArr[j] + " from right subarray");
+          j++;
+        }
+        drawArray(arr, container);
+        await sleep(delay);
+        k++;
+      }
+      while (i < n1) {
+        arr[k] = leftArr[i];
+        updateStatus("merge", "Set index " + k + " to " + leftArr[i] + " from left subarray (remaining)");
+        drawArray(arr, container);
+        await sleep(delay);
+        i++; k++;
+      }
+      while (j < n2) {
+        arr[k] = rightArr[j];
+        updateStatus("merge", "Set index " + k + " to " + rightArr[j] + " from right subarray (remaining)");
+        drawArray(arr, container);
+        await sleep(delay);
+        j++; k++;
+      }
+    }
+
+    // --- Quick Sort の実装 ---
+    async function quickSort(arr, low, high, container) {
+      if (low < high) {
+        let pi = await partition(arr, low, high, container);
+        await quickSort(arr, low, pi - 1, container);
+        await quickSort(arr, pi + 1, high, container);
+      }
+    }
+
+    async function partition(arr, low, high, container) {
+      let pivot = arr[high];
+      let i = low - 1;
+      updateStatus("quick", "Pivot is " + pivot + " at index " + high);
+      await sleep(delay);
+      for (let j = low; j < high; j++) {
+        updateStatus("quick", "Comparing element " + arr[j] + " at index " + j + " with pivot " + pivot);
+        await sleep(delay);
+        if (arr[j] < pivot) {
+          i++;
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+          updateStatus("quick", "Swapped element at index " + i + " and " + j);
+          drawArray(arr, container);
+          await sleep(delay);
+        }
+      }
+      [arr[i + 1], arr[high]] = [arr[high], arr[i + 1]];
+      updateStatus("quick", "Placed pivot " + arr[i+1] + " at index " + (i+1));
+      drawArray(arr, container);
+      await sleep(delay);
+      return i + 1;
+    }
+
+    // --- Bubble Sort の実装 ---
+    async function bubbleSort(arr, container) {
+      let n = arr.length;
+      for (let i = 0; i < n - 1; i++) {
+        for (let j = 0; j < n - 1 - i; j++) {
+          updateStatus("bubble", "Comparing index " + j + " (" + arr[j] + ") and " + (j+1) + " (" + arr[j+1] + ")");
+          await sleep(delay);
+          if (arr[j] > arr[j+1]) {
+            [arr[j], arr[j+1]] = [arr[j+1], arr[j]];
+            updateStatus("bubble", "Swapped index " + j + " and " + (j+1));
+            drawArray(arr, container);
+            await sleep(delay);
+          }
+          drawArray(arr, container);
+          await sleep(delay);
+        }
+      }
+    }
+
+    // --- Insertion Sort の実装 ---
+    async function insertionSort(arr, container) {
+      let n = arr.length;
+      for (let i = 1; i < n; i++) {
+        let key = arr[i];
+        let j = i - 1;
+        updateStatus("insertion", "Consider element at index " + i + " (" + key + ")");
+        await sleep(delay);
+        while (j >= 0 && arr[j] > key) {
+          arr[j+1] = arr[j];
+          updateStatus("insertion", "Moved element " + arr[j] + " from index " + j + " to " + (j+1));
+          drawArray(arr, container);
+          await sleep(delay);
+          j--;
+        }
+        arr[j+1] = key;
+        updateStatus("insertion", "Inserted key " + key + " at index " + (j+1));
+        drawArray(arr, container);
+        await sleep(delay);
+      }
+    }
+
+    // --- スタートボタン押下時の処理 ---
+    document.getElementById("startButton").addEventListener("click", async function() {
+      // ソート中はボタンを無効化
+      this.disabled = true;
+
+      // ランダムな配列を生成（各アルゴリズムで同じ初期状態となるようにコピー）
+      let array = [];
+      for (let i = 0; i < NUM_BARS; i++) {
+        // 値は 10～300 のランダムな整数
+        array.push(Math.floor(Math.random() * 290) + 10);
+      }
+      let mergeArray = array.slice();
+      let quickArray = array.slice();
+      let bubbleArray = array.slice();
+      let insertionArray = array.slice();
+
+      // ステップカウンターをリセット
+      mergeSortStep = 0; quickSortStep = 0; bubbleSortStep = 0; insertionSortStep = 0;
+
+      // 各アルゴリズムのコンテナ取得と初期描画
+      const mergeContainer = document.getElementById("mergeSortContainer");
+      const quickContainer = document.getElementById("quickSortContainer");
+      const bubbleContainer = document.getElementById("bubbleSortContainer");
+      const insertionContainer = document.getElementById("insertionSortContainer");
+
+      drawArray(mergeArray, mergeContainer);
+      drawArray(quickArray, quickContainer);
+      drawArray(bubbleArray, bubbleContainer);
+      drawArray(insertionArray, insertionContainer);
+
+      // 4 つのアルゴリズムを同時に実行
+      await Promise.all([
+        mergeSort(mergeArray, 0, mergeArray.length - 1, mergeContainer),
+        quickSort(quickArray, 0, quickArray.length - 1, quickContainer),
+        bubbleSort(bubbleArray, bubbleContainer),
+        insertionSort(insertionArray, insertionContainer)
+      ]);
+
+      // ソート完了後、ボタンを再び有効化
+      this.disabled = false;
+    });
+  </script>
+</body>
+</html>
