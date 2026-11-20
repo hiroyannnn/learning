@@ -15,7 +15,7 @@ uv run --locked python -m unittest -v test_experiment
 
 SDKスタブで3方式のリクエスト、順位の集計、カテゴリ絞り込み、アカウント照合、リソース削除を確認します。
 実際のAPI通信も試す場合は、同じディレクトリで AWS 公式 Emulator の統合テストを実行します。
-Docker Engine 28以降のローカル環境が必要です（rootful、ユーザー名前空間の再マッピングなし）。
+Docker Engine 28以降のローカル環境（rootful、ユーザー名前空間の再マッピングなし）と、BuildKit、Bash、`curl` が必要です。
 
 ```sh
 bash run_emulator_test.sh
@@ -40,11 +40,13 @@ Hit@1とHit@5は、それぞれ初周の1位以内、5位以内に正解が入�
 
 型番だけの5件は、3方式とも正解が1位でした。
 症状の言い換えだけの Hit@5 は、全文1/5、ベクトル3/5、ハイブリッド3/5でした。型番と症状の組み合わせでは、それぞれ4/5、5/5、5/5でした。
-実測時のカテゴリ絞り込みは前後で同じ5件を返し、別カテゴリの除外はローカルテストで確認しました。
+初回のAWS計測では絞り込み前後で同じ5件が返りました。別カテゴリが結果から外れることはローカルテストで確認しました。
+現在のコードは、正解と別カテゴリの文書が両方含まれる検索結果を選んで絞り込みを試します。該当する結果がなければ、絞り込みは判定不能と表示し、3方式の結果を保存します。
 [AWSの検索仕様](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors-hybrid-search.html)
 
 ## AWSで再計測する
 
+リポジトリのルートから `cd experiments/s3-vectors` で移動します。
 まず `uv run --locked --extra embedding experiment.py` で、文書と検索語の384次元埋め込み、正解ID、投入サイズをローカルで検証できます。
 初回は Python の依存関係と [multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) のモデルを取得します。
 macOS で固定のPyTorchを使う場合は macOS 14以降の Apple Silicon が必要です。
