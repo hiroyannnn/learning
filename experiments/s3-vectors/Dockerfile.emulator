@@ -1,0 +1,12 @@
+ARG TARGETARCH
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal AS base
+
+FROM base AS rpm-amd64
+ADD https://downloads.aws.com/aws-emulator/packages/aws-emulator/LTS/aws-emulator-1.0.533-1-x86_64.rpm /tmp/aws-emulator.rpm
+
+FROM base AS rpm-arm64
+ADD https://downloads.aws.com/aws-emulator/packages/aws-emulator/LTS/aws-emulator-1.0.533-1-aarch64.rpm /tmp/aws-emulator.rpm
+
+FROM rpm-${TARGETARCH}
+RUN rpm -i /tmp/aws-emulator.rpm && rm /tmp/aws-emulator.rpm
+ENTRYPOINT ["aws-emulator", "-b", "0.0.0.0"]
