@@ -39,20 +39,20 @@ MAX_QUERIES = 300
 MAX_LOGICAL_BYTES = 256 * 1024
 RESULTS = Path(__file__).resolve().parent / "results"
 DEFINITE_AWS_REJECTIONS = {
-    "AccessDenied",
-    "AccessDeniedException",
-    "ConflictException",
-    "ExpiredToken",
-    "ExpiredTokenException",
-    "InvalidAccessKeyId",
-    "InvalidClientTokenId",
-    "InvalidSignatureException",
-    "NotFoundException",
-    "ServiceQuotaExceededException",
-    "SignatureDoesNotMatch",
-    "TooManyRequestsException",
-    "UnrecognizedClientException",
-    "ValidationException",
+    "AccessDenied": (403,),
+    "AccessDeniedException": (403,),
+    "ConflictException": (409,),
+    "ExpiredToken": (400, 403),
+    "ExpiredTokenException": (400, 403),
+    "InvalidAccessKeyId": (403,),
+    "InvalidClientTokenId": (403,),
+    "InvalidSignatureException": (400, 403),
+    "NotFoundException": (404,),
+    "ServiceQuotaExceededException": (402,),
+    "SignatureDoesNotMatch": (403,),
+    "TooManyRequestsException": (429,),
+    "UnrecognizedClientException": (400, 403),
+    "ValidationException": (400,),
 }
 CREATE_LOOKUP_DELAYS = (0, 1, 2)
 
@@ -251,17 +251,21 @@ def render_report(result):
     return "\n".join(lines) + "\n"
 
 
-def aws_error_code(error):
+def definite_aws_rejection(error):
     detail = error.response.get("Error")
     code = detail.get("Code") if isinstance(detail, dict) else None
-    return code if isinstance(code, str) else None
+    metadata = error.response.get("ResponseMetadata")
+    status = metadata.get("HTTPStatusCode") if isinstance(metadata, dict) else None
+    if isinstance(code, str) and status in DEFINITE_AWS_REJECTIONS.get(code, ()):
+        return code
+    return None
 
 
 def resource_exists(arn, lookup):
     try:
         found_arn = lookup()
     except ClientError as error:
-        if aws_error_code(error) == "NotFoundException":
+        if definite_aws_rejection(error) == "NotFoundException":
             return False
         raise
     if found_arn != arn:
@@ -274,7 +278,7 @@ def uncertain_aws_response(error):
         error, (CredentialRetrievalError, NoCredentialsError, ParamValidationError, PartialCredentialsError)
     ):
         return False
-    return not isinstance(error, ClientError) or aws_error_code(error) not in DEFINITE_AWS_REJECTIONS
+    return not isinstance(error, ClientError) or definite_aws_rejection(error) is None
 
 
 def cleanup_resource(arn, delete, preceding_error=None):
@@ -304,9 +308,9 @@ def created_resource(arn, arn_field, create, lookup, delete):
             except Exception as lookup_error:
                 if uncertain_aws_response(lookup_error):
                     continue
-                if isinstance(lookup_error, ClientError) and aws_error_code(lookup_error) in {
-                    "TooManyRequestsException", "429"
-                }:
+                if isinstance(lookup_error, ClientError) and (
+                    definite_aws_rejection(lookup_error) == "TooManyRequestsException"
+                ):
                     continue
                 raise RuntimeError(f"Could not verify the create outcome for {arn}: {lookup_error}") from lookup_error
             if found:

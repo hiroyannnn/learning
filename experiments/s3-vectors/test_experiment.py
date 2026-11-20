@@ -50,6 +50,10 @@ def stub_client():
     )
 
 
+def aws_error(code, status, operation):
+    return ClientError({"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": status}}, operation)
+
+
 class ExperimentTests(unittest.TestCase):
     def test_fixtures_have_judgments_for_all_queries(self):
         validate_fixtures(documents(), QUERIES)
@@ -154,7 +158,7 @@ class ExperimentTests(unittest.TestCase):
     def test_cleans_up_bucket_after_create_response_times_out(self):
         client = Mock()
         client.create_vector_bucket.side_effect = ReadTimeoutError(endpoint_url="https://test")
-        missing = ClientError({"Error": {"Code": "NotFoundException"}}, "GetVectorBucket")
+        missing = aws_error("NotFoundException", 404, "GetVectorBucket")
         client.get_vector_bucket.side_effect = [BUCKET_INFO, missing]
 
         with patch("experiment.uuid4", return_value=BUCKET_ID):
@@ -175,9 +179,7 @@ class ExperimentTests(unittest.TestCase):
         client.get_index.return_value = {"index": {"indexArn": INDEX_ARN}}
         timeout = ClientError({"Error": {"Code": "RequestTimeoutException"}}, "CreateIndex")
         client.create_index.side_effect = timeout
-        client.get_vector_bucket.side_effect = ClientError(
-            {"Error": {"Code": "NotFoundException"}}, "GetVectorBucket"
-        )
+        client.get_vector_bucket.side_effect = aws_error("NotFoundException", 404, "GetVectorBucket")
 
         with patch("experiment.uuid4", return_value=BUCKET_ID):
             with self.assertRaisesRegex(ClientError, "RequestTimeoutException"):
@@ -195,9 +197,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_create_conflict_does_not_delete_a_preexisting_bucket(self):
         client = Mock()
-        client.create_vector_bucket.side_effect = ClientError(
-            {"Error": {"Code": "ConflictException"}}, "CreateVectorBucket"
-        )
+        client.create_vector_bucket.side_effect = aws_error("ConflictException", 409, "CreateVectorBucket")
         with patch("experiment.uuid4", return_value=BUCKET_ID):
             with self.assertRaisesRegex(ClientError, "ConflictException"):
                 with temporary_index(client, ACCOUNT):
@@ -210,7 +210,7 @@ class ExperimentTests(unittest.TestCase):
             {"Error": {"Code": "504"}, "ResponseMetadata": {"HTTPStatusCode": 504}},
             "CreateVectorBucket",
         )
-        missing = ClientError({"Error": {"Code": "NotFoundException"}}, "GetVectorBucket")
+        missing = aws_error("NotFoundException", 404, "GetVectorBucket")
         unavailable = ClientError(
             {"Error": {"Code": "ServiceUnavailableException"}}, "GetVectorBucket"
         )
@@ -228,9 +228,7 @@ class ExperimentTests(unittest.TestCase):
         client = Mock()
         client.create_vector_bucket.return_value = {"vectorBucketArn": BUCKET_ARN}
         client.create_index.side_effect = ReadTimeoutError(endpoint_url="https://test")
-        client.get_index.side_effect = ClientError(
-            {"Error": {"Code": "NotFoundException"}}, "GetIndex"
-        )
+        client.get_index.side_effect = aws_error("NotFoundException", 404, "GetIndex")
         client.delete_vector_bucket.side_effect = ClientError(
             {"Error": {"Code": "ConflictException"}}, "DeleteVectorBucket"
         )
@@ -249,7 +247,7 @@ class ExperimentTests(unittest.TestCase):
         client.create_vector_bucket.side_effect = SSLError(endpoint_url="https://test", error="TLS failed")
         client.get_vector_bucket.side_effect = [
             BUCKET_INFO,
-            ClientError({"Error": {"Code": "NotFoundException"}}, "GetVectorBucket"),
+            aws_error("NotFoundException", 404, "GetVectorBucket"),
         ]
         with patch("experiment.uuid4", return_value=BUCKET_ID):
             with self.assertRaises(SSLError):
@@ -258,19 +256,20 @@ class ExperimentTests(unittest.TestCase):
         client.delete_vector_bucket.assert_called_once_with(vectorBucketArn=BUCKET_ARN)
 
     def test_reconciles_bucket_after_ambiguous_sdk_response(self):
-        for status, body, exception in (
-            (504, b"\xff", UnicodeDecodeError),
-            (504, b"[]", AttributeError),
-            (524, b'{"message":"gateway timeout"}', ClientError),
-            (300, b"{}", ClientError),
-            (200, b"{}", RuntimeError),
-            (200, b'{"vectorBucketArn":"unexpected"}', RuntimeError),
+        for status, body, headers, exception in (
+            (504, b"\xff", {}, UnicodeDecodeError),
+            (504, b"[]", {}, AttributeError),
+            (524, b'{"message":"gateway timeout"}', {}, ClientError),
+            (504, b"{}", {"x-amzn-errortype": "ConflictException"}, ClientError),
+            (300, b"{}", {}, ClientError),
+            (200, b"{}", {}, RuntimeError),
+            (200, b'{"vectorBucketArn":"unexpected"}', {}, RuntimeError),
         ):
             with self.subTest(status=status, body=body):
                 client = stub_client()
                 responses = []
                 for status, body, headers in (
-                    (status, body, {}),
+                    (status, body, headers),
                     (200, json.dumps(BUCKET_INFO).encode(), {}),
                     (200, b"{}", {}),
                     (404, b'{"message":"missing"}', {"x-amzn-errortype": "NotFoundException"}),
@@ -295,9 +294,7 @@ class ExperimentTests(unittest.TestCase):
     def test_reports_unresolved_arn_after_three_lookups(self):
         client = Mock()
         client.create_vector_bucket.side_effect = ReadTimeoutError(endpoint_url="https://test")
-        client.get_vector_bucket.side_effect = ClientError(
-            {"Error": {"Code": "NotFoundException"}}, "GetVectorBucket"
-        )
+        client.get_vector_bucket.side_effect = aws_error("NotFoundException", 404, "GetVectorBucket")
 
         with patch("experiment.uuid4", return_value=BUCKET_ID), patch("experiment.sleep"):
             with self.assertRaisesRegex(RuntimeError, BUCKET_ARN):
