@@ -29,6 +29,7 @@ def emulator_client(state_dir, port):
         "endpoint_url": f"https://127.0.0.1:{port}",
         "verify": str(state_dir / "ca.pem"),
         "config": Config(
+            defaults_mode="legacy",
             ignore_configured_endpoint_urls=True,
             inject_host_prefix=False,
             proxies={},

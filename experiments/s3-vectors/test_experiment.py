@@ -44,10 +44,12 @@ def stub_client():
     return boto3.client(
         "s3vectors",
         region_name=REGION,
+        endpoint_url="https://s3vectors.example.invalid",
         aws_access_key_id="test",
         aws_secret_access_key="test",
         config=Config(
-            ignore_configured_endpoint_urls=True,
+            defaults_mode="legacy",
+            proxies={},
             retries={"total_max_attempts": 1},
         ),
     )
