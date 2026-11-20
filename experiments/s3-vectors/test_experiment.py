@@ -36,6 +36,7 @@ BUCKET_ID = UUID(int=1)
 BUCKET_NAME = f"learning-s3v-{BUCKET_ID.hex}"
 BUCKET_ARN = f"arn:aws:s3vectors:{REGION}:{ACCOUNT}:bucket/{BUCKET_NAME}"
 INDEX_ARN = f"{BUCKET_ARN}/index/{INDEX_NAME}"
+BUCKET_INFO = {"vectorBucket": {"vectorBucketArn": BUCKET_ARN}}
 VECTOR = [1.0] + [0.0] * (DIMENSION - 1)
 
 
@@ -154,7 +155,7 @@ class ExperimentTests(unittest.TestCase):
         client = Mock()
         client.create_vector_bucket.side_effect = ReadTimeoutError(endpoint_url="https://test")
         missing = ClientError({"Error": {"Code": "NotFoundException"}}, "GetVectorBucket")
-        client.get_vector_bucket.side_effect = [{"vectorBucket": {}}, missing]
+        client.get_vector_bucket.side_effect = [BUCKET_INFO, missing]
 
         with patch("experiment.uuid4", return_value=BUCKET_ID):
             with self.assertRaises(ReadTimeoutError):
@@ -170,6 +171,8 @@ class ExperimentTests(unittest.TestCase):
 
     def test_cleans_up_index_after_create_response_times_out(self):
         client = Mock()
+        client.create_vector_bucket.return_value = {"vectorBucketArn": BUCKET_ARN}
+        client.get_index.return_value = {"index": {"indexArn": INDEX_ARN}}
         timeout = ClientError({"Error": {"Code": "RequestTimeoutException"}}, "CreateIndex")
         client.create_index.side_effect = timeout
         client.get_vector_bucket.side_effect = ClientError(
@@ -211,7 +214,7 @@ class ExperimentTests(unittest.TestCase):
         unavailable = ClientError(
             {"Error": {"Code": "ServiceUnavailableException"}}, "GetVectorBucket"
         )
-        client.get_vector_bucket.side_effect = [unavailable, missing, {"vectorBucket": {}}, missing]
+        client.get_vector_bucket.side_effect = [unavailable, missing, BUCKET_INFO, missing]
 
         with patch("experiment.uuid4", return_value=BUCKET_ID), patch("experiment.sleep"):
             with self.assertRaisesRegex(ClientError, "504"):
@@ -223,6 +226,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_keeps_unresolved_index_arn_when_bucket_cleanup_fails(self):
         client = Mock()
+        client.create_vector_bucket.return_value = {"vectorBucketArn": BUCKET_ARN}
         client.create_index.side_effect = ReadTimeoutError(endpoint_url="https://test")
         client.get_index.side_effect = ClientError(
             {"Error": {"Code": "NotFoundException"}}, "GetIndex"
@@ -244,7 +248,7 @@ class ExperimentTests(unittest.TestCase):
         client = Mock()
         client.create_vector_bucket.side_effect = SSLError(endpoint_url="https://test", error="TLS failed")
         client.get_vector_bucket.side_effect = [
-            {"vectorBucket": {}},
+            BUCKET_INFO,
             ClientError({"Error": {"Code": "NotFoundException"}}, "GetVectorBucket"),
         ]
         with patch("experiment.uuid4", return_value=BUCKET_ID):
@@ -258,13 +262,16 @@ class ExperimentTests(unittest.TestCase):
             (504, b"\xff", UnicodeDecodeError),
             (504, b"[]", AttributeError),
             (524, b'{"message":"gateway timeout"}', ClientError),
+            (300, b"{}", ClientError),
+            (200, b"{}", RuntimeError),
+            (200, b'{"vectorBucketArn":"unexpected"}', RuntimeError),
         ):
             with self.subTest(status=status, body=body):
                 client = stub_client()
                 responses = []
                 for status, body, headers in (
                     (status, body, {}),
-                    (200, b'{"vectorBucket":{}}', {}),
+                    (200, json.dumps(BUCKET_INFO).encode(), {}),
                     (200, b"{}", {}),
                     (404, b'{"message":"missing"}', {"x-amzn-errortype": "NotFoundException"}),
                 ):

@@ -251,13 +251,21 @@ def render_report(result):
     return "\n".join(lines) + "\n"
 
 
-def resource_exists(lookup):
+def aws_error_code(error):
+    detail = error.response.get("Error")
+    code = detail.get("Code") if isinstance(detail, dict) else None
+    return code if isinstance(code, str) else None
+
+
+def resource_exists(arn, lookup):
     try:
-        lookup()
+        found_arn = lookup()
     except ClientError as error:
-        if error.response["Error"]["Code"] == "NotFoundException":
+        if aws_error_code(error) == "NotFoundException":
             return False
         raise
+    if found_arn != arn:
+        raise RuntimeError(f"Lookup response did not confirm {arn}")
     return True
 
 
@@ -266,7 +274,7 @@ def uncertain_aws_response(error):
         error, (CredentialRetrievalError, NoCredentialsError, ParamValidationError, PartialCredentialsError)
     ):
         return False
-    return not isinstance(error, ClientError) or error.response["Error"]["Code"] not in DEFINITE_AWS_REJECTIONS
+    return not isinstance(error, ClientError) or aws_error_code(error) not in DEFINITE_AWS_REJECTIONS
 
 
 def cleanup_resource(arn, delete, preceding_error=None):
@@ -280,9 +288,10 @@ def cleanup_resource(arn, delete, preceding_error=None):
 
 
 @contextmanager
-def created_resource(arn, create, lookup, delete):
+def created_resource(arn, arn_field, create, lookup, delete):
     try:
-        create()
+        if create().get(arn_field) != arn:
+            raise RuntimeError(f"Create response did not confirm {arn}")
     except Exception as error:
         # Even an ordinary Python exception can come from decoding a response to a committed write.
         if not uncertain_aws_response(error):
@@ -291,11 +300,11 @@ def created_resource(arn, create, lookup, delete):
             if delay:
                 sleep(delay)
             try:
-                found = resource_exists(lookup)
+                found = resource_exists(arn, lookup)
             except Exception as lookup_error:
                 if uncertain_aws_response(lookup_error):
                     continue
-                if isinstance(lookup_error, ClientError) and lookup_error.response["Error"]["Code"] in {
+                if isinstance(lookup_error, ClientError) and aws_error_code(lookup_error) in {
                     "TooManyRequestsException", "429"
                 }:
                     continue
@@ -320,25 +329,31 @@ def temporary_index(client, account):
     bucket_name = f"learning-s3v-{uuid4().hex}"
     bucket_arn = f"arn:aws:s3vectors:{REGION}:{account}:bucket/{bucket_name}"
     index_arn = f"{bucket_arn}/index/{INDEX_NAME}"
-    lookup_bucket = partial(client.get_vector_bucket, vectorBucketArn=bucket_arn)
+    def lookup_bucket():
+        return client.get_vector_bucket(vectorBucketArn=bucket_arn)["vectorBucket"]["vectorBucketArn"]
+
+    def lookup_index():
+        return client.get_index(indexArn=index_arn)["index"]["indexArn"]
 
     def delete_bucket():
         client.delete_vector_bucket(vectorBucketArn=bucket_arn)
-        if resource_exists(lookup_bucket):
+        if resource_exists(bucket_arn, lookup_bucket):
             raise RuntimeError(f"Vector bucket still exists: {bucket_arn}")
         print(f"Confirmed deleted: {bucket_name}", flush=True)
 
     print(f"Vector bucket for this run: {bucket_name}", flush=True)
     with created_resource(
         bucket_arn,
+        "vectorBucketArn",
         partial(client.create_vector_bucket, vectorBucketName=bucket_name),
         lookup_bucket,
         delete_bucket,
     ):
         with created_resource(
             index_arn,
+            "indexArn",
             partial(client.create_index, **index_options(bucket_arn)),
-            partial(client.get_index, indexArn=index_arn),
+            lookup_index,
             partial(client.delete_index, indexArn=index_arn),
         ):
             yield index_arn
