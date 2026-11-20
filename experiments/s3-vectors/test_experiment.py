@@ -9,7 +9,7 @@ from unittest.mock import Mock, call, patch
 from uuid import UUID
 
 import boto3
-from botocore.exceptions import ClientError, ReadTimeoutError
+from botocore.exceptions import ClientError, ReadTimeoutError, SSLError
 from botocore.stub import Stubber
 
 from experiment import (
@@ -211,6 +211,19 @@ class ExperimentTests(unittest.TestCase):
         self.assertIn(INDEX_ARN, str(failure.exception))
         self.assertIn("ConflictException", str(failure.exception))
         self.assertEqual(client.get_index.call_count, 3)
+
+    def test_reconciles_bucket_after_create_tls_error(self):
+        client = Mock()
+        client.create_vector_bucket.side_effect = SSLError(endpoint_url="https://test", error="TLS failed")
+        client.get_vector_bucket.side_effect = [
+            {"vectorBucket": {}},
+            ClientError({"Error": {"Code": "NotFoundException"}}, "GetVectorBucket"),
+        ]
+        with patch("experiment.uuid4", return_value=BUCKET_ID):
+            with self.assertRaises(SSLError):
+                with temporary_index(client, ACCOUNT):
+                    self.fail("measurement started after a TLS error")
+        client.delete_vector_bucket.assert_called_once_with(vectorBucketArn=BUCKET_ARN)
 
     def test_reports_unresolved_arn_after_three_lookups(self):
         client = Mock()

@@ -30,7 +30,7 @@ trap 'exit 143' TERM
 
 container=$(docker run --detach --rm --memory=2g --memory-swap=2g \
     --user "$(id -u):$(id -g)" --env HOME=/emulator \
-    --publish "127.0.0.1:$port:$port" --volume "$state:/emulator" \
+    --publish "127.0.0.1:$port:$port" --volume "$state:/emulator:Z" \
     "$image" --port "$port" --telemetry off)
 emulator_dir="$state/.aws/emulator/$port"
 
