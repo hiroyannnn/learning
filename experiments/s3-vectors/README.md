@@ -16,6 +16,7 @@ uv run --locked python -m unittest -v test_experiment
 SDKスタブで3方式のリクエスト、順位の集計、カテゴリ絞り込み、アカウント照合、リソース削除を確認します。
 実際のAPI通信も試す場合は、同じディレクトリで AWS 公式 Emulator の統合テストを実行します。
 Docker Engine 28以降のローカル環境（rootful、ユーザー名前空間の再マッピングなし）と、BuildKit、Bash、`curl` が必要です。
+Docker のビルド対象は `amd64` または `arm64` です。初回のビルドではベースイメージと AWS の Emulator パッケージを取得します。
 
 ```sh
 bash run_emulator_test.sh
