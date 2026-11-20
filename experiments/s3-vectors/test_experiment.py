@@ -46,7 +46,10 @@ def stub_client():
         region_name=REGION,
         aws_access_key_id="test",
         aws_secret_access_key="test",
-        config=Config(retries={"total_max_attempts": 1}),
+        config=Config(
+            ignore_configured_endpoint_urls=True,
+            retries={"total_max_attempts": 1},
+        ),
     )
 
 
