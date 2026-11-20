@@ -230,30 +230,32 @@ class ExperimentTests(unittest.TestCase):
         client.delete_vector_bucket.assert_called_once_with(vectorBucketArn=BUCKET_ARN)
 
     def test_reconciles_bucket_after_sdk_cannot_decode_create_response(self):
-        client = stub_client()
-        responses = []
-        for status, body, headers in (
-            (504, b"\xff", {}),
-            (200, b'{"vectorBucket":{}}', {}),
-            (200, b"{}", {}),
-            (404, b'{"message":"missing"}', {"x-amzn-errortype": "NotFoundException"}),
-        ):
-            raw = Mock()
-            raw.stream.return_value = [body]
-            responses.append(AWSResponse("https://test", status, headers, raw))
+        for malformed, exception in ((b"\xff", UnicodeDecodeError), (b"[]", AttributeError)):
+            with self.subTest(malformed=malformed):
+                client = stub_client()
+                responses = []
+                for status, body, headers in (
+                    (504, malformed, {}),
+                    (200, b'{"vectorBucket":{}}', {}),
+                    (200, b"{}", {}),
+                    (404, b'{"message":"missing"}', {"x-amzn-errortype": "NotFoundException"}),
+                ):
+                    raw = Mock()
+                    raw.stream.return_value = [body]
+                    responses.append(AWSResponse("https://test", status, headers, raw))
 
-        with (
-            patch("experiment.uuid4", return_value=BUCKET_ID),
-            patch.object(client._endpoint.http_session, "send", side_effect=responses) as send,
-            self.assertRaises(UnicodeDecodeError),
-        ):
-            with temporary_index(client, ACCOUNT):
-                self.fail("measurement started after an undecodable response")
+                with (
+                    patch("experiment.uuid4", return_value=BUCKET_ID),
+                    patch.object(client._endpoint.http_session, "send", side_effect=responses) as send,
+                    self.assertRaises(exception),
+                ):
+                    with temporary_index(client, ACCOUNT):
+                        self.fail("measurement started after an invalid response")
 
-        self.assertEqual(
-            [urlsplit(sent.args[0].url).path for sent in send.call_args_list],
-            ["/CreateVectorBucket", "/GetVectorBucket", "/DeleteVectorBucket", "/GetVectorBucket"],
-        )
+                self.assertEqual(
+                    [urlsplit(sent.args[0].url).path for sent in send.call_args_list],
+                    ["/CreateVectorBucket", "/GetVectorBucket", "/DeleteVectorBucket", "/GetVectorBucket"],
+                )
 
     def test_reports_unresolved_arn_after_three_lookups(self):
         client = Mock()

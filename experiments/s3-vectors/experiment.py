@@ -16,9 +16,13 @@ from uuid import uuid4
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError, HTTPClientError, IncompleteReadError
-from botocore.exceptions import ConnectionError as AWSConnectionError
-from botocore.parsers import ResponseParserError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    NoCredentialsError,
+    ParamValidationError,
+    PartialCredentialsError,
+)
 
 from fixtures import QUERIES, documents
 
@@ -40,15 +44,6 @@ AMBIGUOUS_CREATE_ERRORS = {
 }
 AMBIGUOUS_HTTP_STATUSES = {408, 500, 502, 503, 504}
 CREATE_LOOKUP_DELAYS = (0, 1, 2)
-AWS_REQUEST_ERRORS = (
-    ClientError,
-    AWSConnectionError,
-    HTTPClientError,
-    IncompleteReadError,
-    ResponseParserError,
-    UnicodeError,
-    json.JSONDecodeError,
-)
 
 
 def validate_fixtures(corpus, queries):
@@ -256,6 +251,8 @@ def resource_exists(lookup):
 
 
 def uncertain_aws_response(error):
+    if isinstance(error, (NoCredentialsError, ParamValidationError, PartialCredentialsError)):
+        return False
     if not isinstance(error, ClientError):
         return True
     code = error.response["Error"]["Code"]
@@ -266,7 +263,7 @@ def uncertain_aws_response(error):
 def cleanup_resource(arn, delete, preceding_error=None):
     try:
         delete()
-    except (*AWS_REQUEST_ERRORS, RuntimeError) as cleanup_error:
+    except Exception as cleanup_error:
         message = f"Cleanup failed for {arn}: {cleanup_error}"
         if preceding_error is not None:
             message = f"{preceding_error}\n{message}"
@@ -277,7 +274,8 @@ def cleanup_resource(arn, delete, preceding_error=None):
 def created_resource(arn, create, lookup, delete):
     try:
         create()
-    except AWS_REQUEST_ERRORS as error:
+    except Exception as error:
+        # Even an ordinary Python exception can come from decoding a response to a committed write.
         if not uncertain_aws_response(error):
             raise
         for delay in CREATE_LOOKUP_DELAYS:
@@ -285,10 +283,12 @@ def created_resource(arn, create, lookup, delete):
                 sleep(delay)
             try:
                 found = resource_exists(lookup)
-            except AWS_REQUEST_ERRORS as lookup_error:
+            except Exception as lookup_error:
                 if uncertain_aws_response(lookup_error):
                     continue
-                if lookup_error.response["Error"]["Code"] in {"TooManyRequestsException", "429"}:
+                if isinstance(lookup_error, ClientError) and lookup_error.response["Error"]["Code"] in {
+                    "TooManyRequestsException", "429"
+                }:
                     continue
                 raise RuntimeError(f"Could not verify the create outcome for {arn}: {lookup_error}") from lookup_error
             if found:
@@ -385,7 +385,7 @@ def main():
         filter_error = None
         try:
             filter_check = check_filter(client, index_arn, corpus, QUERIES, query_vectors, rows)
-        except (*AWS_REQUEST_ERRORS, RuntimeError) as error:
+        except Exception as error:
             filter_error = error
             filter_check = {"status": "failed", "error": str(error)}
         result = {
@@ -410,5 +410,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (*AWS_REQUEST_ERRORS, ValueError, RuntimeError) as error:
+    except (BotoCoreError, ClientError, ValueError, RuntimeError) as error:
         sys.exit(str(error))
