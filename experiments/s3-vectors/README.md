@@ -14,7 +14,7 @@
 
 ## ローカルで準備する
 
-前提は Python 3.12 と `uv`。
+前提は Python 3.12 と `uv`。macOSで埋め込みを生成する場合、固定したPyTorchの配布対象は macOS 14以降のApple Silicon。
 
 ```sh
 cd experiments/s3-vectors
@@ -25,6 +25,8 @@ uv run --locked --extra embedding experiment.py
 
 ## ローカルテスト
 
+Docker 統合テストは Docker Engine 28.0.0 以降のローカル環境で実行する。 [Dockerのポート公開仕様](https://docs.docker.com/engine/network/port-publishing/)
+
 ```sh
 uv run --locked python -m unittest -v test_experiment
 bash run_emulator_test.sh
@@ -34,7 +36,7 @@ bash run_emulator_test.sh
 
 Emulator v1.0.533 の `QueryVectors` はベクトル距離で順位付けする。全文とハイブリッドのリクエスト・集計はスタブで検証し、日本語の全文検索・RRFの順位・応答時間は東京リージョンの実測を参照する。 [AWS Emulatorの利用手順](https://docs.aws.amazon.com/emulator/latest/userguide/getting-started-docker.html) · [固定版の検索実装](https://github.com/aws/aws-emulator/blob/v1.0.533/services/service-com-amazonaws-s3vectors-s3vectors/src/ops/query_vectors.rs)
 
-2026年11月20日、Apple Silicon の macOS でスタブ8件と Docker 統合テスト1件が成功した。
+2026年11月20日、Apple Silicon の macOS でSDKテスト11件と Docker 統合テスト1件が成功した。
 
 ## AWSで計測する
 
@@ -44,13 +46,13 @@ Emulator v1.0.533 の `QueryVectors` はベクトル距離で順位付けする�
 uv run --locked --extra embedding experiment.py --live --profile "$AWS_PROFILE" --expected-account "$AWS_ACCOUNT_ID"
 ```
 
-`--repeats` は既定で3周。各周は15件×3方式。最後に、絞り込み前のハイブリッド検索結果に別カテゴリの文書がある検索語を1件選び、絞り込み後にそれらが除外されることを確認する。既定は136検索、最大6周でも271検索。SDKの自動再試行は無効で、実行し直すと別の計測になる。必要な権限はバケットとインデックスの作成・削除、`GetVectorBucket`、`GetIndex`、`PutVectors`、`QueryVectors`、`GetVectors`。 [AWSの権限一覧](https://docs.aws.amazon.com/service-authorization/latest/reference/list_s3vectors.html)
+`--repeats` は既定で3周。各周は15件×3方式。最後に、絞り込み前のハイブリッド検索結果に正解と別カテゴリの文書がある検索語を1件選び、絞り込み後に別カテゴリが除外されることを確認する。該当する検索語がなければ判定不能と記録し、計測結果を保存する。既定は最大136検索、6周でも最大271検索。SDKの自動再試行は無効で、実行し直すと別の計測になる。必要な権限はバケットとインデックスの作成・削除、`GetVectorBucket`、`GetIndex`、`PutVectors`、`QueryVectors`、`GetVectors`。 [AWSの権限一覧](https://docs.aws.amazon.com/service-authorization/latest/reference/list_s3vectors.html)
 
 2026年11月20日の東京リージョン公開単価では、上限300検索とその他API最大8回を見込んでも1回約0.0014 USD未満。投入上限は256 KiB。無料枠・クレジットは試算に含めず、削除後の継続費は0 USD。 [料金の計算方法](https://aws.amazon.com/s3/pricing/#S3_Vectors) · [東京の単価](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/20261120022349/ap-northeast-1/index.json)
 
 計測結果は `results/` にJSONとMarkdownで出力する。1周目の検索語別の正解順位から Hit@5 を計算する。応答時間はクライアント側のAPI所要時間で、方式ごとの最初の1回と2周目以降の中央値を記録する。埋め込み生成時間は含めない。少量の合成データで検索結果の傾向を見るための測定であり、実運用の負荷や他サービスとの性能比較には追加計測が必要になる。
 
-計測後は作成したインデックスとバケットを削除し、`Confirmed deleted` を表示する。作成応答がタイムアウトした場合は、その実行専用のARNで存在を照合し、作成済みのリソースを削除する。処理が中断した場合や削除を確認できない場合は、開始時に表示された `learning-s3v-...` の名前を使い、同じアカウントとリージョンで専用インデックス `faq` とバケットの残存を確認する。 [AWSの削除手順](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors-buckets-delete.html)
+計測後は作成したインデックスとバケットを削除し、`Confirmed deleted` を表示する。作成応答がタイムアウトした場合は、その実行専用のARNで最大3回照合し、見つかったリソースを削除する。作成の結果を確定できなければ、確認が必要なARNをエラーに表示する。処理が中断した場合や削除を確認できない場合は、開始時に表示された `learning-s3v-...` の名前を使い、同じアカウントとリージョンで専用インデックス `faq` とバケットの残存を確認する。 [AWSの削除手順](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors-buckets-delete.html)
 
 ## 結果
 

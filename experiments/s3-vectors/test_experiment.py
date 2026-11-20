@@ -1,4 +1,9 @@
+import json
 import unittest
+from contextlib import nullcontext
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 from uuid import UUID
 
@@ -14,6 +19,7 @@ from experiment import (
     aws_session,
     check_filter,
     index_options,
+    main,
     measure,
     render_report,
     temporary_index,
@@ -79,7 +85,7 @@ class ExperimentTests(unittest.TestCase):
             "date": "2026-11-20",
             "repeats": 2,
             "rows": rows,
-            "filter": {"query": "混合検索", "category": "test", "keys": ["right"]},
+            "filter": {"status": "passed", "query": "混合検索", "category": "test", "keys": ["right"]},
         })
         self.assertIn("| 全文 | 0/3 | 0/1 | 0/1 | 0/1 |", report)
         self.assertIn("| ベクトル | 3/3 | 1/1 | 1/1 | 1/1 |", report)
@@ -163,6 +169,38 @@ class ExperimentTests(unittest.TestCase):
                     self.fail("measurement started after a conflict")
         self.assertEqual(client.mock_calls, [call.create_vector_bucket(vectorBucketName=BUCKET_NAME)])
 
+    def test_rechecks_after_gateway_timeout_until_bucket_appears(self):
+        client = Mock()
+        client.create_vector_bucket.side_effect = ClientError(
+            {"Error": {"Code": "504"}, "ResponseMetadata": {"HTTPStatusCode": 504}},
+            "CreateVectorBucket",
+        )
+        missing = ClientError({"Error": {"Code": "NotFoundException"}}, "GetVectorBucket")
+        client.get_vector_bucket.side_effect = [missing, {"vectorBucket": {}}, missing]
+
+        with patch("experiment.uuid4", return_value=BUCKET_ID), patch("experiment.sleep"):
+            with self.assertRaisesRegex(ClientError, "504"):
+                with temporary_index(client, ACCOUNT):
+                    self.fail("measurement started after a gateway timeout")
+
+        self.assertEqual(client.get_vector_bucket.call_count, 3)
+        client.delete_vector_bucket.assert_called_once_with(vectorBucketArn=BUCKET_ARN)
+
+    def test_reports_unresolved_arn_after_three_lookups(self):
+        client = Mock()
+        client.create_vector_bucket.side_effect = ReadTimeoutError(endpoint_url="https://test")
+        client.get_vector_bucket.side_effect = ClientError(
+            {"Error": {"Code": "NotFoundException"}}, "GetVectorBucket"
+        )
+
+        with patch("experiment.uuid4", return_value=BUCKET_ID), patch("experiment.sleep"):
+            with self.assertRaisesRegex(RuntimeError, BUCKET_ARN):
+                with temporary_index(client, ACCOUNT):
+                    self.fail("measurement started despite an unresolved create")
+
+        self.assertEqual(client.get_vector_bucket.call_count, 3)
+        client.delete_vector_bucket.assert_not_called()
+
     def test_filter_requires_proof_that_another_category_was_excluded(self):
         corpus = [Document("right", "coffee", "豆挽き"), Document("other", "air", "送風")]
         queries = [Query("型番", "型番", ("right",)), Query("言い換え", "症状", ("right",))]
@@ -193,6 +231,29 @@ class ExperimentTests(unittest.TestCase):
                     self.assertEqual(result["unfiltered_keys"], ["right", "other"])
                     self.assertEqual(result["keys"], ["right"])
                 stub.assert_no_pending_responses()
+
+    def test_keeps_rankings_when_filter_cannot_be_verified(self):
+        client = Mock()
+        client.query_vectors.return_value = {"vectors": []}
+        args = SimpleNamespace(live=True, profile="test", expected_account=ACCOUNT, repeats=1)
+        with TemporaryDirectory() as directory:
+            results = Path(directory)
+            with (
+                patch("experiment.RESULTS", results),
+                patch("experiment.parse_args", return_value=(args, 46)),
+                patch("experiment.embed", return_value=([VECTOR] * 100, [VECTOR] * 15)),
+                patch("experiment.aws_session", return_value=client),
+                patch("experiment.temporary_index", return_value=nullcontext(INDEX_ARN)),
+            ):
+                main()
+            result = json.loads(next(results.glob("*.json")).read_text(encoding="utf-8"))
+            report = next(results.glob("*.md")).read_text(encoding="utf-8")
+
+        self.assertEqual(client.query_vectors.call_count, 45)
+        self.assertEqual(len(result["rows"]), 45)
+        self.assertEqual(result["filter"]["status"], "inconclusive")
+        self.assertIn("合計45回", report)
+        self.assertIn("カテゴリ絞り込みは判定不能", report)
 
 
 if __name__ == "__main__":

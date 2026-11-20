@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from statistics import median
-from time import perf_counter
+from time import perf_counter, sleep
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -36,6 +36,8 @@ AMBIGUOUS_CREATE_ERRORS = {
     "InternalServerException",
     "ServiceUnavailableException",
 }
+AMBIGUOUS_HTTP_STATUSES = {408, 500, 502, 503, 504}
+CREATE_LOOKUP_DELAYS = (0, 1, 2)
 
 
 def validate_fixtures(corpus, queries):
@@ -169,19 +171,26 @@ def check_filter(client, index_arn, corpus, queries, query_vectors, rows):
         keys = [hit["key"] for hit in hits]
         if not keys or any(categories.get(key) != category for key in keys):
             raise RuntimeError(f"Metadata filter returned invalid hits for category {category}")
-        return {"query": query.text, "category": category, "unfiltered_keys": unfiltered, "keys": keys}
-    raise RuntimeError("No unfiltered hybrid result can verify category filtering")
+        return {
+            "status": "passed",
+            "query": query.text,
+            "category": category,
+            "unfiltered_keys": unfiltered,
+            "keys": keys,
+        }
+    return {"status": "inconclusive"}
 
 
 def render_report(result):
     rows = result["rows"]
     first_pass = [row for row in rows if row["repeat"] == 1]
     filter_check = result["filter"]
+    search_count = len(rows) + int(filter_check["status"] != "inconclusive")
     lines = [
         "### 東京リージョンの実測",
         "",
         f"{result['date']}、東京リージョン、FAQ100件、検索語15件、各方式{result['repeats']}周。",
-        f"検索APIは絞り込み確認の1回を含めて合計{len(rows) + 1}回。",
+        f"検索APIは合計{search_count}回。",
         "Hit@5は初回の各検索語について、正解文書が上位5件に1件でも入れば1件と数えた。",
         "応答時間はローカルからSDK呼び出し完了まで。埋め込み時間を除く。",
         "",
@@ -209,11 +218,16 @@ def render_report(result):
         ranks = {row["mode"]: row["rank"] for row in first_pass if row["query"] == query}
         cells = " | ".join(str(ranks[mode]) if ranks[mode] else "圏外" for mode in MODES)
         lines.append(f"| {query} | {cells} |")
-    lines += [
-        "",
-        f"カテゴリ絞り込み「{filter_check['query']}」で "
-        f"`{filter_check['category']}` の文書だけが{len(filter_check['keys'])}件返った。",
-    ]
+    lines.append("")
+    if filter_check["status"] == "passed":
+        lines.append(
+            f"カテゴリ絞り込み「{filter_check['query']}」で "
+            f"`{filter_check['category']}` の文書だけが{len(filter_check['keys'])}件返った。"
+        )
+    elif filter_check["status"] == "failed":
+        lines.append(f"カテゴリ絞り込みの確認に失敗した。{filter_check['error']}")
+    else:
+        lines.append("カテゴリ絞り込みは判定不能。絞り込みで除外を確認できる検索語がなかった。")
     return "\n".join(lines) + "\n"
 
 
@@ -228,14 +242,27 @@ def resource_exists(lookup):
 
 
 @contextmanager
-def created_resource(create, lookup, delete):
+def created_resource(arn, create, lookup, delete):
     try:
         create()
     except (ClientError, HTTPClientError) as error:
-        if isinstance(error, ClientError) and error.response["Error"]["Code"] not in AMBIGUOUS_CREATE_ERRORS:
-            raise
-        if resource_exists(lookup):
-            delete()
+        if isinstance(error, ClientError):
+            code = error.response["Error"]["Code"]
+            status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if code not in AMBIGUOUS_CREATE_ERRORS and status not in AMBIGUOUS_HTTP_STATUSES:
+                raise
+        for delay in CREATE_LOOKUP_DELAYS:
+            if delay:
+                sleep(delay)
+            try:
+                found = resource_exists(lookup)
+            except (ClientError, HTTPClientError) as lookup_error:
+                raise RuntimeError(f"Could not verify the create outcome for {arn}: {lookup_error}") from lookup_error
+            if found:
+                delete()
+                break
+        else:
+            raise RuntimeError(f"Create outcome unresolved for {arn}. Check for leftover resources.") from error
         raise
     try:
         yield
@@ -258,11 +285,13 @@ def temporary_index(client, account):
 
     print(f"Vector bucket for this run: {bucket_name}", flush=True)
     with created_resource(
+        bucket_arn,
         partial(client.create_vector_bucket, vectorBucketName=bucket_name),
         lookup_bucket,
         delete_bucket,
     ):
         with created_resource(
+            index_arn,
             partial(client.create_index, **index_options(bucket_arn)),
             partial(client.get_index, indexArn=index_arn),
             partial(client.delete_index, indexArn=index_arn),
@@ -317,7 +346,12 @@ def main():
     with temporary_index(client, args.expected_account) as index_arn:
         client.put_vectors(indexArn=index_arn, vectors=batch)
         rows = measure(client, index_arn, QUERIES, query_vectors, args.repeats)
-        filter_check = check_filter(client, index_arn, corpus, QUERIES, query_vectors, rows)
+        filter_error = None
+        try:
+            filter_check = check_filter(client, index_arn, corpus, QUERIES, query_vectors, rows)
+        except (ClientError, HTTPClientError, RuntimeError) as error:
+            filter_error = error
+            filter_check = {"status": "failed", "error": str(error)}
         result = {
             "date": now.astimezone(ZoneInfo("Asia/Tokyo")).date().isoformat(),
             "region": REGION,
@@ -331,6 +365,8 @@ def main():
         )
         output_stem.with_suffix(".md").write_text(render_report(result), encoding="utf-8")
         print(f"Results saved to {output_stem}.json and {output_stem}.md", flush=True)
+        if filter_error is not None:
+            raise filter_error
 
 
 if __name__ == "__main__":
