@@ -1,0 +1,12 @@
+ARG TARGETARCH
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:8873a7cbc7c3d51d55a749c7c4c7894b7981f0514c269003c7952cf3ed550d27 AS base
+
+FROM base AS rpm-amd64
+ADD --checksum=sha256:019ec17c7bad63e5a85c498f3cded50db979cdb443dbbe86ac55ea82ccf05fa7 https://downloads.aws.com/aws-emulator/packages/aws-emulator/LTS/aws-emulator-1.0.533-1-x86_64.rpm /tmp/aws-emulator.rpm
+
+FROM base AS rpm-arm64
+ADD --checksum=sha256:be90084475822def8567f3bde0bbe78215a1e6b88eadd0192b077037b33b6e0e https://downloads.aws.com/aws-emulator/packages/aws-emulator/LTS/aws-emulator-1.0.533-1-aarch64.rpm /tmp/aws-emulator.rpm
+
+FROM rpm-${TARGETARCH}
+RUN rpm -i /tmp/aws-emulator.rpm && rm /tmp/aws-emulator.rpm
+ENTRYPOINT ["aws-emulator", "-b", "0.0.0.0"]
