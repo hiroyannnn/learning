@@ -36,7 +36,7 @@ bash run_emulator_test.sh
 
 Emulator v1.0.533 の `QueryVectors` はベクトル距離で順位付けする。全文とハイブリッドのリクエスト・集計はスタブで検証し、日本語の全文検索・RRFの順位・応答時間は東京リージョンの実測を参照する。 [AWS Emulatorの利用手順](https://docs.aws.amazon.com/emulator/latest/userguide/getting-started-docker.html) · [固定版の検索実装](https://github.com/aws/aws-emulator/blob/v1.0.533/services/service-com-amazonaws-s3vectors-s3vectors/src/ops/query_vectors.rs)
 
-2026年11月20日、Apple Silicon の macOS でSDKテスト13件と Docker 統合テスト1件が成功した。
+2026年11月20日、Apple Silicon の macOS でSDKテスト14件と Docker 統合テスト1件が成功した。
 
 ## AWSで計測する
 

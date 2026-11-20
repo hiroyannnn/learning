@@ -6,9 +6,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import boto3
+from botocore.awsrequest import AWSResponse
+from botocore.config import Config
 from botocore.exceptions import ClientError, ReadTimeoutError, SSLError
 from botocore.stub import Stubber
 
@@ -42,6 +45,7 @@ def stub_client():
         region_name=REGION,
         aws_access_key_id="test",
         aws_secret_access_key="test",
+        config=Config(retries={"total_max_attempts": 1}),
     )
 
 
@@ -224,6 +228,32 @@ class ExperimentTests(unittest.TestCase):
                 with temporary_index(client, ACCOUNT):
                     self.fail("measurement started after a TLS error")
         client.delete_vector_bucket.assert_called_once_with(vectorBucketArn=BUCKET_ARN)
+
+    def test_reconciles_bucket_after_sdk_cannot_decode_create_response(self):
+        client = stub_client()
+        responses = []
+        for status, body, headers in (
+            (504, b"\xff", {}),
+            (200, b'{"vectorBucket":{}}', {}),
+            (200, b"{}", {}),
+            (404, b'{"message":"missing"}', {"x-amzn-errortype": "NotFoundException"}),
+        ):
+            raw = Mock()
+            raw.stream.return_value = [body]
+            responses.append(AWSResponse("https://test", status, headers, raw))
+
+        with (
+            patch("experiment.uuid4", return_value=BUCKET_ID),
+            patch.object(client._endpoint.http_session, "send", side_effect=responses) as send,
+            self.assertRaises(UnicodeDecodeError),
+        ):
+            with temporary_index(client, ACCOUNT):
+                self.fail("measurement started after an undecodable response")
+
+        self.assertEqual(
+            [urlsplit(sent.args[0].url).path for sent in send.call_args_list],
+            ["/CreateVectorBucket", "/GetVectorBucket", "/DeleteVectorBucket", "/GetVectorBucket"],
+        )
 
     def test_reports_unresolved_arn_after_three_lookups(self):
         client = Mock()

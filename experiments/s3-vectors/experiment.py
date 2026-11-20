@@ -41,7 +41,13 @@ AMBIGUOUS_CREATE_ERRORS = {
 AMBIGUOUS_HTTP_STATUSES = {408, 500, 502, 503, 504}
 CREATE_LOOKUP_DELAYS = (0, 1, 2)
 AWS_REQUEST_ERRORS = (
-    ClientError, AWSConnectionError, HTTPClientError, IncompleteReadError, ResponseParserError
+    ClientError,
+    AWSConnectionError,
+    HTTPClientError,
+    IncompleteReadError,
+    ResponseParserError,
+    UnicodeError,
+    json.JSONDecodeError,
 )
 
 
