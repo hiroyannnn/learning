@@ -139,7 +139,7 @@ def query_options(index_arn, mode, query, vector, category=None):
 
 def call_query(client, options):
     start = perf_counter()
-    response = client.query_vectors(**options)
+    response = require_success(client.query_vectors(**options), "QueryVectors")
     elapsed_ms = (perf_counter() - start) * 1000
     return response["vectors"], round(elapsed_ms, 3)
 
@@ -251,12 +251,22 @@ def render_report(result):
     return "\n".join(lines) + "\n"
 
 
+def http_status(response):
+    metadata = response.get("ResponseMetadata") if isinstance(response, dict) else None
+    return metadata.get("HTTPStatusCode") if isinstance(metadata, dict) else None
+
+
+def require_success(response, operation):
+    status = http_status(response)
+    if status != 200:
+        raise RuntimeError(f"{operation} response did not confirm success (HTTP {status})")
+    return response
+
+
 def definite_aws_rejection(error):
     detail = error.response.get("Error")
     code = detail.get("Code") if isinstance(detail, dict) else None
-    metadata = error.response.get("ResponseMetadata")
-    status = metadata.get("HTTPStatusCode") if isinstance(metadata, dict) else None
-    if isinstance(code, str) and status in DEFINITE_AWS_REJECTIONS.get(code, ()):
+    if isinstance(code, str) and http_status(error.response) in DEFINITE_AWS_REJECTIONS.get(code, ()):
         return code
     return None
 
@@ -294,7 +304,7 @@ def cleanup_resource(arn, delete, preceding_error=None):
 @contextmanager
 def created_resource(arn, arn_field, create, lookup, delete):
     try:
-        if create().get(arn_field) != arn:
+        if require_success(create(), f"Create {arn}").get(arn_field) != arn:
             raise RuntimeError(f"Create response did not confirm {arn}")
     except Exception as error:
         # Even an ordinary Python exception can come from decoding a response to a committed write.
@@ -334,16 +344,21 @@ def temporary_index(client, account):
     bucket_arn = f"arn:aws:s3vectors:{REGION}:{account}:bucket/{bucket_name}"
     index_arn = f"{bucket_arn}/index/{INDEX_NAME}"
     def lookup_bucket():
-        return client.get_vector_bucket(vectorBucketArn=bucket_arn)["vectorBucket"]["vectorBucketArn"]
+        response = require_success(client.get_vector_bucket(vectorBucketArn=bucket_arn), "GetVectorBucket")
+        return response["vectorBucket"]["vectorBucketArn"]
 
     def lookup_index():
-        return client.get_index(indexArn=index_arn)["index"]["indexArn"]
+        response = require_success(client.get_index(indexArn=index_arn), "GetIndex")
+        return response["index"]["indexArn"]
 
     def delete_bucket():
-        client.delete_vector_bucket(vectorBucketArn=bucket_arn)
+        require_success(client.delete_vector_bucket(vectorBucketArn=bucket_arn), "DeleteVectorBucket")
         if resource_exists(bucket_arn, lookup_bucket):
             raise RuntimeError(f"Vector bucket still exists: {bucket_arn}")
         print(f"Confirmed deleted: {bucket_name}", flush=True)
+
+    def delete_index():
+        require_success(client.delete_index(indexArn=index_arn), "DeleteIndex")
 
     print(f"Vector bucket for this run: {bucket_name}", flush=True)
     with created_resource(
@@ -358,7 +373,7 @@ def temporary_index(client, account):
             "indexArn",
             partial(client.create_index, **index_options(bucket_arn)),
             lookup_index,
-            partial(client.delete_index, indexArn=index_arn),
+            delete_index,
         ):
             yield index_arn
 
@@ -382,7 +397,8 @@ def aws_session(profile, expected_account):
         aws_secret_access_key=verified_credentials.secret_key,
         aws_session_token=verified_credentials.token,
     )
-    account = session.client("sts", config=config).get_caller_identity()["Account"]
+    identity = require_success(session.client("sts", config=config).get_caller_identity(), "GetCallerIdentity")
+    account = identity["Account"]
     if account != expected_account:
         raise ValueError("STS account differs from --expected-account. No resources were created.")
     return session.client("s3vectors", config=config)
@@ -419,7 +435,7 @@ def main():
     now = datetime.now(timezone.utc)
     output_stem = RESULTS / f"{now:%Y%m%dT%H%M%S%fZ}-{uuid4().hex}"
     with temporary_index(client, args.expected_account) as index_arn:
-        client.put_vectors(indexArn=index_arn, vectors=batch)
+        require_success(client.put_vectors(indexArn=index_arn, vectors=batch), "PutVectors")
         rows = measure(client, index_arn, QUERIES, query_vectors, args.repeats)
         filter_error = None
         try:

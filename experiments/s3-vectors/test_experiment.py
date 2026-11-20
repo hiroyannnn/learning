@@ -50,6 +50,17 @@ def stub_client():
     )
 
 
+def aws_success(data=None, status=200):
+    return {**(data or {}), "ResponseMetadata": {"HTTPStatusCode": status}}
+
+
+def mock_resource_client():
+    client = Mock()
+    client.delete_vector_bucket.return_value = aws_success()
+    client.delete_index.return_value = aws_success()
+    return client
+
+
 def aws_error(code, status, operation):
     return ClientError({"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": status}}, operation)
 
@@ -85,7 +96,7 @@ class ExperimentTests(unittest.TestCase):
                     for mode in MODES[offset:] + MODES[:offset]:
                         stub.add_response(
                             "query_vectors",
-                            {"vectors": hits[mode], "distanceMetric": "cosine"},
+                            aws_success({"vectors": hits[mode], "distanceMetric": "cosine"}),
                             {"indexArn": INDEX_ARN, "topK": 5, **options[mode]},
                         )
             rows = measure(client, INDEX_ARN, queries, [VECTOR] * len(queries), repeats=2)
@@ -108,11 +119,11 @@ class ExperimentTests(unittest.TestCase):
     def test_deletes_temporary_resources_when_measurement_fails(self):
         client = stub_client()
         with Stubber(client) as stub, patch("experiment.uuid4", return_value=BUCKET_ID):
-            stub.add_response("create_vector_bucket", {"vectorBucketArn": BUCKET_ARN},
+            stub.add_response("create_vector_bucket", aws_success({"vectorBucketArn": BUCKET_ARN}),
                               {"vectorBucketName": BUCKET_NAME})
-            stub.add_response("create_index", {"indexArn": INDEX_ARN}, index_options(BUCKET_ARN))
-            stub.add_response("delete_index", {}, {"indexArn": INDEX_ARN})
-            stub.add_response("delete_vector_bucket", {}, {"vectorBucketArn": BUCKET_ARN})
+            stub.add_response("create_index", aws_success({"indexArn": INDEX_ARN}), index_options(BUCKET_ARN))
+            stub.add_response("delete_index", aws_success(), {"indexArn": INDEX_ARN})
+            stub.add_response("delete_vector_bucket", aws_success(), {"vectorBucketArn": BUCKET_ARN})
             stub.add_client_error("get_vector_bucket", "NotFoundException", http_status_code=404,
                                   expected_params={"vectorBucketArn": BUCKET_ARN})
             with self.assertRaisesRegex(RuntimeError, "measurement failed"):
@@ -123,7 +134,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_account_mismatch_stops_before_s3_client_is_created(self):
         sts = Mock()
-        sts.get_caller_identity.return_value = {"Account": "999999999999"}
+        sts.get_caller_identity.return_value = aws_success({"Account": "999999999999"})
         with patch("experiment.boto3.Session") as session:
             session.return_value.client.return_value = sts
             with self.assertRaisesRegex(ValueError, "STS account differs"):
@@ -139,7 +150,7 @@ class ExperimentTests(unittest.TestCase):
         )
         verified = Mock()
         sts = Mock()
-        sts.get_caller_identity.return_value = {"Account": ACCOUNT}
+        sts.get_caller_identity.return_value = aws_success({"Account": ACCOUNT})
         vectors = Mock()
         verified.client.side_effect = [sts, vectors]
         with patch("experiment.boto3.Session", side_effect=[source, verified]) as session:
@@ -156,10 +167,10 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual([entry.args[0] for entry in verified.client.call_args_list], ["sts", "s3vectors"])
 
     def test_cleans_up_bucket_after_create_response_times_out(self):
-        client = Mock()
+        client = mock_resource_client()
         client.create_vector_bucket.side_effect = ReadTimeoutError(endpoint_url="https://test")
         missing = aws_error("NotFoundException", 404, "GetVectorBucket")
-        client.get_vector_bucket.side_effect = [BUCKET_INFO, missing]
+        client.get_vector_bucket.side_effect = [aws_success(BUCKET_INFO), missing]
 
         with patch("experiment.uuid4", return_value=BUCKET_ID):
             with self.assertRaises(ReadTimeoutError):
@@ -174,9 +185,9 @@ class ExperimentTests(unittest.TestCase):
         ])
 
     def test_cleans_up_index_after_create_response_times_out(self):
-        client = Mock()
-        client.create_vector_bucket.return_value = {"vectorBucketArn": BUCKET_ARN}
-        client.get_index.return_value = {"index": {"indexArn": INDEX_ARN}}
+        client = mock_resource_client()
+        client.create_vector_bucket.return_value = aws_success({"vectorBucketArn": BUCKET_ARN})
+        client.get_index.return_value = aws_success({"index": {"indexArn": INDEX_ARN}})
         timeout = ClientError({"Error": {"Code": "RequestTimeoutException"}}, "CreateIndex")
         client.create_index.side_effect = timeout
         client.get_vector_bucket.side_effect = aws_error("NotFoundException", 404, "GetVectorBucket")
@@ -196,7 +207,7 @@ class ExperimentTests(unittest.TestCase):
         ])
 
     def test_create_conflict_does_not_delete_a_preexisting_bucket(self):
-        client = Mock()
+        client = mock_resource_client()
         client.create_vector_bucket.side_effect = aws_error("ConflictException", 409, "CreateVectorBucket")
         with patch("experiment.uuid4", return_value=BUCKET_ID):
             with self.assertRaisesRegex(ClientError, "ConflictException"):
@@ -205,7 +216,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(client.mock_calls, [call.create_vector_bucket(vectorBucketName=BUCKET_NAME)])
 
     def test_rechecks_after_gateway_timeout_until_bucket_appears(self):
-        client = Mock()
+        client = mock_resource_client()
         client.create_vector_bucket.side_effect = ClientError(
             {"Error": {"Code": "504"}, "ResponseMetadata": {"HTTPStatusCode": 504}},
             "CreateVectorBucket",
@@ -214,7 +225,7 @@ class ExperimentTests(unittest.TestCase):
         unavailable = ClientError(
             {"Error": {"Code": "ServiceUnavailableException"}}, "GetVectorBucket"
         )
-        client.get_vector_bucket.side_effect = [unavailable, missing, BUCKET_INFO, missing]
+        client.get_vector_bucket.side_effect = [unavailable, aws_success(BUCKET_INFO, 202), aws_success(BUCKET_INFO), missing]
 
         with patch("experiment.uuid4", return_value=BUCKET_ID), patch("experiment.sleep"):
             with self.assertRaisesRegex(ClientError, "504"):
@@ -225,8 +236,8 @@ class ExperimentTests(unittest.TestCase):
         client.delete_vector_bucket.assert_called_once_with(vectorBucketArn=BUCKET_ARN)
 
     def test_keeps_unresolved_index_arn_when_bucket_cleanup_fails(self):
-        client = Mock()
-        client.create_vector_bucket.return_value = {"vectorBucketArn": BUCKET_ARN}
+        client = mock_resource_client()
+        client.create_vector_bucket.return_value = aws_success({"vectorBucketArn": BUCKET_ARN})
         client.create_index.side_effect = ReadTimeoutError(endpoint_url="https://test")
         client.get_index.side_effect = aws_error("NotFoundException", 404, "GetIndex")
         client.delete_vector_bucket.side_effect = ClientError(
@@ -243,10 +254,10 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(client.get_index.call_count, 3)
 
     def test_reconciles_bucket_after_create_tls_error(self):
-        client = Mock()
+        client = mock_resource_client()
         client.create_vector_bucket.side_effect = SSLError(endpoint_url="https://test", error="TLS failed")
         client.get_vector_bucket.side_effect = [
-            BUCKET_INFO,
+            aws_success(BUCKET_INFO),
             aws_error("NotFoundException", 404, "GetVectorBucket"),
         ]
         with patch("experiment.uuid4", return_value=BUCKET_ID):
@@ -262,6 +273,7 @@ class ExperimentTests(unittest.TestCase):
             (524, b'{"message":"gateway timeout"}', {}, ClientError),
             (504, b"{}", {"x-amzn-errortype": "ConflictException"}, ClientError),
             (300, b"{}", {}, ClientError),
+            (202, json.dumps({"vectorBucketArn": BUCKET_ARN}).encode(), {}, RuntimeError),
             (200, b"{}", {}, RuntimeError),
             (200, b'{"vectorBucketArn":"unexpected"}', {}, RuntimeError),
         ):
@@ -292,7 +304,7 @@ class ExperimentTests(unittest.TestCase):
                 )
 
     def test_reports_unresolved_arn_after_three_lookups(self):
-        client = Mock()
+        client = mock_resource_client()
         client.create_vector_bucket.side_effect = ReadTimeoutError(endpoint_url="https://test")
         client.get_vector_bucket.side_effect = aws_error("NotFoundException", 404, "GetVectorBucket")
 
@@ -324,7 +336,7 @@ class ExperimentTests(unittest.TestCase):
         for keys in (["right"], ["right", "other"]):
             with self.subTest(keys=keys), Stubber(stub_client()) as stub:
                 stub.add_response(
-                    "query_vectors", {"vectors": [{"key": key} for key in keys], "distanceMetric": "cosine"},
+                    "query_vectors", aws_success({"vectors": [{"key": key} for key in keys], "distanceMetric": "cosine"}),
                     expected_request,
                 )
                 if "other" in keys:
@@ -338,8 +350,9 @@ class ExperimentTests(unittest.TestCase):
                 stub.assert_no_pending_responses()
 
     def test_keeps_rankings_when_filter_cannot_be_verified(self):
-        client = Mock()
-        client.query_vectors.return_value = {"vectors": []}
+        client = mock_resource_client()
+        client.put_vectors.return_value = aws_success()
+        client.query_vectors.return_value = aws_success({"vectors": []})
         args = SimpleNamespace(live=True, profile="test", expected_account=ACCOUNT, repeats=1)
         with TemporaryDirectory() as directory:
             results = Path(directory)
