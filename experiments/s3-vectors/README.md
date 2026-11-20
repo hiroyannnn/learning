@@ -50,7 +50,7 @@ Hit@1とHit@5は、それぞれ初周の1位以内、5位以内に正解が入�
 リポジトリのルートから `cd experiments/s3-vectors` で移動します。
 まず `uv run --locked --extra embedding experiment.py` で、文書と検索語の384次元埋め込み、正解ID、投入サイズをローカルで検証できます。
 初回は Python の依存関係と [multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) のモデルを取得します。
-macOS で固定のPyTorchを使う場合は macOS 14以降の Apple Silicon が必要です。
+固定したPyTorchのwheelは、macOS 14以降のApple Silicon、glibc 2.28以降のLinux（x86-64、ARM64）、Windows x64向けです。コマンド例はBashで記載しています。
 
 AWSで計測する場合は、利用する個人アカウント、東京リージョン（`ap-northeast-1`）の単価と費用を実行前に確認してください。
 `AWS_PROFILE` と `AWS_ACCOUNT_ID` には使用するプロファイルと12桁のアカウントIDを設定します。
