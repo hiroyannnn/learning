@@ -1,6 +1,7 @@
 import json
 import unittest
 from contextlib import nullcontext
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -85,7 +86,10 @@ class ExperimentTests(unittest.TestCase):
             "date": "2026-11-20",
             "repeats": 2,
             "rows": rows,
-            "filter": {"status": "passed", "query": "混合検索", "category": "test", "keys": ["right"]},
+            "filter": {
+                "status": "passed", "query": "混合検索", "category": "test",
+                "baseline_repeat": 1, "keys": ["right"],
+            },
         })
         self.assertIn("| 全文 | 0/3 | 0/1 | 0/1 | 0/1 |", report)
         self.assertIn("| ベクトル | 3/3 | 1/1 | 1/1 | 1/1 |", report)
@@ -176,15 +180,37 @@ class ExperimentTests(unittest.TestCase):
             "CreateVectorBucket",
         )
         missing = ClientError({"Error": {"Code": "NotFoundException"}}, "GetVectorBucket")
-        client.get_vector_bucket.side_effect = [missing, {"vectorBucket": {}}, missing]
+        unavailable = ClientError(
+            {"Error": {"Code": "ServiceUnavailableException"}}, "GetVectorBucket"
+        )
+        client.get_vector_bucket.side_effect = [unavailable, missing, {"vectorBucket": {}}, missing]
 
         with patch("experiment.uuid4", return_value=BUCKET_ID), patch("experiment.sleep"):
             with self.assertRaisesRegex(ClientError, "504"):
                 with temporary_index(client, ACCOUNT):
                     self.fail("measurement started after a gateway timeout")
 
-        self.assertEqual(client.get_vector_bucket.call_count, 3)
+        self.assertEqual(client.get_vector_bucket.call_count, 4)
         client.delete_vector_bucket.assert_called_once_with(vectorBucketArn=BUCKET_ARN)
+
+    def test_keeps_unresolved_index_arn_when_bucket_cleanup_fails(self):
+        client = Mock()
+        client.create_index.side_effect = ReadTimeoutError(endpoint_url="https://test")
+        client.get_index.side_effect = ClientError(
+            {"Error": {"Code": "NotFoundException"}}, "GetIndex"
+        )
+        client.delete_vector_bucket.side_effect = ClientError(
+            {"Error": {"Code": "ConflictException"}}, "DeleteVectorBucket"
+        )
+
+        with patch("experiment.uuid4", return_value=BUCKET_ID), patch("experiment.sleep"):
+            with self.assertRaises(RuntimeError) as failure:
+                with temporary_index(client, ACCOUNT):
+                    self.fail("measurement started despite an unresolved index")
+
+        self.assertIn(INDEX_ARN, str(failure.exception))
+        self.assertIn("ConflictException", str(failure.exception))
+        self.assertEqual(client.get_index.call_count, 3)
 
     def test_reports_unresolved_arn_after_three_lookups(self):
         client = Mock()
@@ -206,7 +232,8 @@ class ExperimentTests(unittest.TestCase):
         queries = [Query("型番", "型番", ("right",)), Query("言い換え", "症状", ("right",))]
         rows = [
             {"mode": "ハイブリッド", "repeat": 1, "query": "型番", "hits": [{"key": "right"}]},
-            {"mode": "ハイブリッド", "repeat": 1, "query": "症状",
+            {"mode": "ハイブリッド", "repeat": 1, "query": "症状", "hits": [{"key": "right"}]},
+            {"mode": "ハイブリッド", "repeat": 2, "query": "症状",
              "hits": [{"key": "right"}, {"key": "other"}]},
         ]
         expected_request = {
@@ -229,6 +256,7 @@ class ExperimentTests(unittest.TestCase):
                 else:
                     result = check_filter(stub.client, INDEX_ARN, corpus, queries, [VECTOR] * 2, rows)
                     self.assertEqual(result["unfiltered_keys"], ["right", "other"])
+                    self.assertEqual(result["baseline_repeat"], 2)
                     self.assertEqual(result["keys"], ["right"])
                 stub.assert_no_pending_responses()
 
@@ -244,6 +272,7 @@ class ExperimentTests(unittest.TestCase):
                 patch("experiment.embed", return_value=([VECTOR] * 100, [VECTOR] * 15)),
                 patch("experiment.aws_session", return_value=client),
                 patch("experiment.temporary_index", return_value=nullcontext(INDEX_ARN)),
+                patch("sys.stderr", new_callable=StringIO) as stderr,
             ):
                 main()
             result = json.loads(next(results.glob("*.json")).read_text(encoding="utf-8"))
@@ -254,6 +283,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(result["filter"]["status"], "inconclusive")
         self.assertIn("合計45回", report)
         self.assertIn("カテゴリ絞り込みは判定不能", report)
+        self.assertIn("カテゴリ絞り込みは判定不能", stderr.getvalue())
 
 
 if __name__ == "__main__":

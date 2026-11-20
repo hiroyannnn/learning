@@ -5,6 +5,13 @@ cd "$(dirname "$0")"
 image=learning-s3-vectors-emulator:1.0.533
 port=${S3V_EMULATOR_PORT:-9297}
 
+runtime=$(docker info --format '{{.ServerVersion}} {{json .SecurityOptions}}')
+major=${runtime%%.*}
+if [[ ! "$major" =~ ^[0-9]+$ ]] || (( major < 28 )) || [[ "$runtime" == *name=rootless* || "$runtime" == *name=userns* ]]; then
+    echo "Use a local Docker Engine 28+ with rootful Docker and no user namespace remapping." >&2
+    exit 1
+fi
+
 docker build -t "$image" - < Dockerfile.emulator
 
 state=$(mktemp -d)

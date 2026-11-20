@@ -7,13 +7,12 @@ import re
 import sys
 from collections import Counter
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from statistics import median
 from time import perf_counter, sleep
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 import boto3
 from botocore.config import Config
@@ -22,6 +21,7 @@ from botocore.exceptions import ClientError, HTTPClientError
 from fixtures import QUERIES, documents
 
 REGION = "ap-northeast-1"
+JST = timezone(timedelta(hours=9))
 INDEX_NAME = "faq"
 MODEL = "intfloat/multilingual-e5-small"
 MODEL_REVISION = "614241f622f53c4eeff9890bdc4f31cfecc418b3"
@@ -153,14 +153,16 @@ def measure(client, index_arn, queries, query_vectors, repeats):
 
 def check_filter(client, index_arn, corpus, queries, query_vectors, rows):
     categories = {doc.key: doc.category for doc in corpus}
-    first_hybrid = {
-        row["query"]: [hit["key"] for hit in row["hits"]]
-        for row in rows
-        if row["mode"] == "ハイブリッド" and row["repeat"] == 1
+    query_inputs = {
+        query.text: (query, vector)
+        for query, vector in zip(queries, query_vectors, strict=True)
     }
-    for query, vector in zip(queries, query_vectors, strict=True):
+    for row in rows:
+        if row["mode"] != "ハイブリッド":
+            continue
+        query, vector = query_inputs[row["query"]]
         category = categories[query.expected_keys[0]]
-        unfiltered = first_hybrid[query.text]
+        unfiltered = [hit["key"] for hit in row["hits"]]
         if not any(categories[key] != category for key in unfiltered):
             continue
         if not any(key in query.expected_keys for key in unfiltered):
@@ -175,6 +177,7 @@ def check_filter(client, index_arn, corpus, queries, query_vectors, rows):
             "status": "passed",
             "query": query.text,
             "category": category,
+            "baseline_repeat": row["repeat"],
             "unfiltered_keys": unfiltered,
             "keys": keys,
         }
@@ -221,7 +224,7 @@ def render_report(result):
     lines.append("")
     if filter_check["status"] == "passed":
         lines.append(
-            f"カテゴリ絞り込み「{filter_check['query']}」で "
+            f"{filter_check['baseline_repeat']}周目の「{filter_check['query']}」を使ったカテゴリ絞り込みで "
             f"`{filter_check['category']}` の文書だけが{len(filter_check['keys'])}件返った。"
         )
     elif filter_check["status"] == "failed":
@@ -241,33 +244,55 @@ def resource_exists(lookup):
     return True
 
 
+def uncertain_aws_response(error):
+    if isinstance(error, HTTPClientError):
+        return True
+    code = error.response["Error"]["Code"]
+    status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return code in AMBIGUOUS_CREATE_ERRORS or status in AMBIGUOUS_HTTP_STATUSES
+
+
+def cleanup_resource(arn, delete, preceding_error=None):
+    try:
+        delete()
+    except (ClientError, HTTPClientError, RuntimeError) as cleanup_error:
+        message = f"Cleanup failed for {arn}: {cleanup_error}"
+        if preceding_error is not None:
+            message = f"{preceding_error}\n{message}"
+        raise RuntimeError(message) from cleanup_error
+
+
 @contextmanager
 def created_resource(arn, create, lookup, delete):
     try:
         create()
     except (ClientError, HTTPClientError) as error:
-        if isinstance(error, ClientError):
-            code = error.response["Error"]["Code"]
-            status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-            if code not in AMBIGUOUS_CREATE_ERRORS and status not in AMBIGUOUS_HTTP_STATUSES:
-                raise
+        if not uncertain_aws_response(error):
+            raise
         for delay in CREATE_LOOKUP_DELAYS:
             if delay:
                 sleep(delay)
             try:
                 found = resource_exists(lookup)
             except (ClientError, HTTPClientError) as lookup_error:
+                if uncertain_aws_response(lookup_error):
+                    continue
+                if lookup_error.response["Error"]["Code"] in {"TooManyRequestsException", "429"}:
+                    continue
                 raise RuntimeError(f"Could not verify the create outcome for {arn}: {lookup_error}") from lookup_error
             if found:
-                delete()
+                cleanup_resource(arn, delete, error)
                 break
         else:
             raise RuntimeError(f"Create outcome unresolved for {arn}. Check for leftover resources.") from error
         raise
     try:
         yield
-    finally:
-        delete()
+    except BaseException as error:
+        cleanup_resource(arn, delete, error)
+        raise
+    else:
+        cleanup_resource(arn, delete)
 
 
 @contextmanager
@@ -342,7 +367,7 @@ def main():
     client = aws_session(args.profile, args.expected_account)
     RESULTS.mkdir(exist_ok=True)
     now = datetime.now(timezone.utc)
-    output_stem = RESULTS / now.strftime("%Y%m%dT%H%M%S%fZ")
+    output_stem = RESULTS / f"{now:%Y%m%dT%H%M%S%fZ}-{uuid4().hex}"
     with temporary_index(client, args.expected_account) as index_arn:
         client.put_vectors(indexArn=index_arn, vectors=batch)
         rows = measure(client, index_arn, QUERIES, query_vectors, args.repeats)
@@ -353,7 +378,7 @@ def main():
             filter_error = error
             filter_check = {"status": "failed", "error": str(error)}
         result = {
-            "date": now.astimezone(ZoneInfo("Asia/Tokyo")).date().isoformat(),
+            "date": now.astimezone(JST).date().isoformat(),
             "region": REGION,
             "model": f"{MODEL}@{MODEL_REVISION}",
             "repeats": args.repeats,
@@ -367,6 +392,8 @@ def main():
         print(f"Results saved to {output_stem}.json and {output_stem}.md", flush=True)
         if filter_error is not None:
             raise filter_error
+        if filter_check["status"] == "inconclusive":
+            print("カテゴリ絞り込みは判定不能。計測結果を保存しました。", file=sys.stderr)
 
 
 if __name__ == "__main__":

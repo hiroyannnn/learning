@@ -25,7 +25,7 @@ uv run --locked --extra embedding experiment.py
 
 ## ローカルテスト
 
-Docker 統合テストは Docker Engine 28.0.0 以降のローカル環境で実行する。 [Dockerのポート公開仕様](https://docs.docker.com/engine/network/port-publishing/)
+Docker 統合テストには Docker Engine 28.0.0 以降の、rootful でユーザー名前空間の再マッピングを使わないローカル環境が必要。 [Dockerのポート公開仕様](https://docs.docker.com/engine/network/port-publishing/)
 
 ```sh
 uv run --locked python -m unittest -v test_experiment
@@ -36,7 +36,7 @@ bash run_emulator_test.sh
 
 Emulator v1.0.533 の `QueryVectors` はベクトル距離で順位付けする。全文とハイブリッドのリクエスト・集計はスタブで検証し、日本語の全文検索・RRFの順位・応答時間は東京リージョンの実測を参照する。 [AWS Emulatorの利用手順](https://docs.aws.amazon.com/emulator/latest/userguide/getting-started-docker.html) · [固定版の検索実装](https://github.com/aws/aws-emulator/blob/v1.0.533/services/service-com-amazonaws-s3vectors-s3vectors/src/ops/query_vectors.rs)
 
-2026年11月20日、Apple Silicon の macOS でSDKテスト11件と Docker 統合テスト1件が成功した。
+2026年11月20日、Apple Silicon の macOS でSDKテスト12件と Docker 統合テスト1件が成功した。
 
 ## AWSで計測する
 
@@ -46,7 +46,7 @@ Emulator v1.0.533 の `QueryVectors` はベクトル距離で順位付けする�
 uv run --locked --extra embedding experiment.py --live --profile "$AWS_PROFILE" --expected-account "$AWS_ACCOUNT_ID"
 ```
 
-`--repeats` は既定で3周。各周は15件×3方式。最後に、絞り込み前のハイブリッド検索結果に正解と別カテゴリの文書がある検索語を1件選び、絞り込み後に別カテゴリが除外されることを確認する。該当する検索語がなければ判定不能と記録し、計測結果を保存する。既定は最大136検索、6周でも最大271検索。SDKの自動再試行は無効で、実行し直すと別の計測になる。必要な権限はバケットとインデックスの作成・削除、`GetVectorBucket`、`GetIndex`、`PutVectors`、`QueryVectors`、`GetVectors`。 [AWSの権限一覧](https://docs.aws.amazon.com/service-authorization/latest/reference/list_s3vectors.html)
+`--repeats` は既定で3周。各周は15件×3方式。全周のハイブリッド検索結果から、正解と別カテゴリの文書を含む検索語を1件選び、絞り込み後に別カテゴリが除外されることを確認する。該当する検索語がなければ端末に判定不能と表示し、計測結果を保存する。既定は最大136検索、6周でも最大271検索。SDKの自動再試行は無効で、実行し直すと別の計測になる。必要な権限はバケットとインデックスの作成・削除、`GetVectorBucket`、`GetIndex`、`PutVectors`、`QueryVectors`、`GetVectors`。 [AWSの権限一覧](https://docs.aws.amazon.com/service-authorization/latest/reference/list_s3vectors.html)
 
 2026年11月20日の東京リージョン公開単価では、上限300検索とその他API最大8回を見込んでも1回約0.0014 USD未満。投入上限は256 KiB。無料枠・クレジットは試算に含めず、削除後の継続費は0 USD。 [料金の計算方法](https://aws.amazon.com/s3/pricing/#S3_Vectors) · [東京の単価](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/20261120022349/ap-northeast-1/index.json)
 
