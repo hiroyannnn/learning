@@ -8,6 +8,7 @@ import sys
 from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from statistics import median
 from time import perf_counter
@@ -16,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, HTTPClientError
 
 from fixtures import QUERIES, documents
 
@@ -30,6 +31,11 @@ TOP_K = 5
 MAX_QUERIES = 300
 MAX_LOGICAL_BYTES = 256 * 1024
 RESULTS = Path(__file__).resolve().parent / "results"
+AMBIGUOUS_CREATE_ERRORS = {
+    "RequestTimeoutException",
+    "InternalServerException",
+    "ServiceUnavailableException",
+}
 
 
 def validate_fixtures(corpus, queries):
@@ -45,7 +51,12 @@ def validate_fixtures(corpus, queries):
 
 
 def embed(corpus, queries):
-    from sentence_transformers import SentenceTransformer
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ModuleNotFoundError as error:
+        if error.name != "sentence_transformers":
+            raise
+        raise RuntimeError("Run with: uv run --locked --extra embedding experiment.py") from error
 
     model = SentenceTransformer(MODEL, revision=MODEL_REVISION, device="cpu")
     vectors = model.encode(
@@ -138,15 +149,28 @@ def measure(client, index_arn, queries, query_vectors, repeats):
     return rows
 
 
-def check_filter(client, index_arn, corpus, query, vector):
+def check_filter(client, index_arn, corpus, queries, query_vectors, rows):
     categories = {doc.key: doc.category for doc in corpus}
-    category = categories[query.expected_keys[0]]
-    options = query_options(index_arn, "ハイブリッド", query, vector, category=category)
-    hits, _ = call_query(client, options)
-    keys = [hit["key"] for hit in hits]
-    if not keys or any(categories.get(key) != category for key in keys):
-        raise RuntimeError(f"Metadata filter returned invalid hits for category {category}")
-    return {"query": query.text, "category": category, "keys": keys}
+    first_hybrid = {
+        row["query"]: [hit["key"] for hit in row["hits"]]
+        for row in rows
+        if row["mode"] == "ハイブリッド" and row["repeat"] == 1
+    }
+    for query, vector in zip(queries, query_vectors, strict=True):
+        category = categories[query.expected_keys[0]]
+        unfiltered = first_hybrid[query.text]
+        if not any(categories[key] != category for key in unfiltered):
+            continue
+        if not any(key in query.expected_keys for key in unfiltered):
+            continue
+
+        options = query_options(index_arn, "ハイブリッド", query, vector, category=category)
+        hits, _ = call_query(client, options)
+        keys = [hit["key"] for hit in hits]
+        if not keys or any(categories.get(key) != category for key in keys):
+            raise RuntimeError(f"Metadata filter returned invalid hits for category {category}")
+        return {"query": query.text, "category": category, "unfiltered_keys": unfiltered, "keys": keys}
+    raise RuntimeError("No unfiltered hybrid result can verify category filtering")
 
 
 def render_report(result):
@@ -193,14 +217,30 @@ def render_report(result):
     return "\n".join(lines) + "\n"
 
 
-def verify_absent(client, bucket_arn):
+def resource_exists(lookup):
     try:
-        client.get_vector_bucket(vectorBucketArn=bucket_arn)
+        lookup()
     except ClientError as error:
         if error.response["Error"]["Code"] == "NotFoundException":
-            return
+            return False
         raise
-    raise RuntimeError(f"Vector bucket still exists: {bucket_arn}")
+    return True
+
+
+@contextmanager
+def created_resource(create, lookup, delete):
+    try:
+        create()
+    except (ClientError, HTTPClientError) as error:
+        if isinstance(error, ClientError) and error.response["Error"]["Code"] not in AMBIGUOUS_CREATE_ERRORS:
+            raise
+        if resource_exists(lookup):
+            delete()
+        raise
+    try:
+        yield
+    finally:
+        delete()
 
 
 @contextmanager
@@ -208,18 +248,26 @@ def temporary_index(client, account):
     bucket_name = f"learning-s3v-{uuid4().hex}"
     bucket_arn = f"arn:aws:s3vectors:{REGION}:{account}:bucket/{bucket_name}"
     index_arn = f"{bucket_arn}/index/{INDEX_NAME}"
-    print(f"Vector bucket for this run: {bucket_name}", flush=True)
-    client.create_vector_bucket(vectorBucketName=bucket_name)
-    try:
-        client.create_index(**index_options(bucket_arn))
-        try:
-            yield index_arn
-        finally:
-            client.delete_index(indexArn=index_arn)
-    finally:
+    lookup_bucket = partial(client.get_vector_bucket, vectorBucketArn=bucket_arn)
+
+    def delete_bucket():
         client.delete_vector_bucket(vectorBucketArn=bucket_arn)
-        verify_absent(client, bucket_arn)
+        if resource_exists(lookup_bucket):
+            raise RuntimeError(f"Vector bucket still exists: {bucket_arn}")
         print(f"Confirmed deleted: {bucket_name}", flush=True)
+
+    print(f"Vector bucket for this run: {bucket_name}", flush=True)
+    with created_resource(
+        partial(client.create_vector_bucket, vectorBucketName=bucket_name),
+        lookup_bucket,
+        delete_bucket,
+    ):
+        with created_resource(
+            partial(client.create_index, **index_options(bucket_arn)),
+            partial(client.get_index, indexArn=index_arn),
+            partial(client.delete_index, indexArn=index_arn),
+        ):
+            yield index_arn
 
 
 def aws_session(profile, expected_account):
@@ -269,7 +317,7 @@ def main():
     with temporary_index(client, args.expected_account) as index_arn:
         client.put_vectors(indexArn=index_arn, vectors=batch)
         rows = measure(client, index_arn, QUERIES, query_vectors, args.repeats)
-        filter_check = check_filter(client, index_arn, corpus, QUERIES[-1], query_vectors[-1])
+        filter_check = check_filter(client, index_arn, corpus, QUERIES, query_vectors, rows)
         result = {
             "date": now.astimezone(ZoneInfo("Asia/Tokyo")).date().isoformat(),
             "region": REGION,
@@ -288,5 +336,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ClientError, ValueError, RuntimeError) as error:
+    except (ClientError, HTTPClientError, ValueError, RuntimeError) as error:
         sys.exit(str(error))

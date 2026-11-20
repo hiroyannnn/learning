@@ -1,8 +1,9 @@
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 from uuid import UUID
 
 import boto3
+from botocore.exceptions import ClientError, ReadTimeoutError
 from botocore.stub import Stubber
 
 from experiment import (
@@ -11,13 +12,14 @@ from experiment import (
     MODES,
     REGION,
     aws_session,
+    check_filter,
     index_options,
     measure,
     render_report,
     temporary_index,
     validate_fixtures,
 )
-from fixtures import QUERIES, Query, documents
+from fixtures import QUERIES, Document, Query, documents
 
 ACCOUNT = "123456789012"
 BUCKET_ID = UUID(int=1)
@@ -109,6 +111,88 @@ class ExperimentTests(unittest.TestCase):
                 aws_session("test", ACCOUNT)
             session.return_value.client.assert_called_once()
             self.assertEqual(session.return_value.client.call_args.args, ("sts",))
+
+    def test_cleans_up_bucket_after_create_response_times_out(self):
+        client = Mock()
+        client.create_vector_bucket.side_effect = ReadTimeoutError(endpoint_url="https://test")
+        missing = ClientError({"Error": {"Code": "NotFoundException"}}, "GetVectorBucket")
+        client.get_vector_bucket.side_effect = [{"vectorBucket": {}}, missing]
+
+        with patch("experiment.uuid4", return_value=BUCKET_ID):
+            with self.assertRaises(ReadTimeoutError):
+                with temporary_index(client, ACCOUNT):
+                    self.fail("measurement started after a timeout")
+
+        self.assertEqual(client.mock_calls, [
+            call.create_vector_bucket(vectorBucketName=BUCKET_NAME),
+            call.get_vector_bucket(vectorBucketArn=BUCKET_ARN),
+            call.delete_vector_bucket(vectorBucketArn=BUCKET_ARN),
+            call.get_vector_bucket(vectorBucketArn=BUCKET_ARN),
+        ])
+
+    def test_cleans_up_index_after_create_response_times_out(self):
+        client = Mock()
+        timeout = ClientError({"Error": {"Code": "RequestTimeoutException"}}, "CreateIndex")
+        client.create_index.side_effect = timeout
+        client.get_vector_bucket.side_effect = ClientError(
+            {"Error": {"Code": "NotFoundException"}}, "GetVectorBucket"
+        )
+
+        with patch("experiment.uuid4", return_value=BUCKET_ID):
+            with self.assertRaisesRegex(ClientError, "RequestTimeoutException"):
+                with temporary_index(client, ACCOUNT):
+                    self.fail("measurement started after a timeout")
+
+        self.assertEqual(client.mock_calls, [
+            call.create_vector_bucket(vectorBucketName=BUCKET_NAME),
+            call.create_index(**index_options(BUCKET_ARN)),
+            call.get_index(indexArn=INDEX_ARN),
+            call.delete_index(indexArn=INDEX_ARN),
+            call.delete_vector_bucket(vectorBucketArn=BUCKET_ARN),
+            call.get_vector_bucket(vectorBucketArn=BUCKET_ARN),
+        ])
+
+    def test_create_conflict_does_not_delete_a_preexisting_bucket(self):
+        client = Mock()
+        client.create_vector_bucket.side_effect = ClientError(
+            {"Error": {"Code": "ConflictException"}}, "CreateVectorBucket"
+        )
+        with patch("experiment.uuid4", return_value=BUCKET_ID):
+            with self.assertRaisesRegex(ClientError, "ConflictException"):
+                with temporary_index(client, ACCOUNT):
+                    self.fail("measurement started after a conflict")
+        self.assertEqual(client.mock_calls, [call.create_vector_bucket(vectorBucketName=BUCKET_NAME)])
+
+    def test_filter_requires_proof_that_another_category_was_excluded(self):
+        corpus = [Document("right", "coffee", "豆挽き"), Document("other", "air", "送風")]
+        queries = [Query("型番", "型番", ("right",)), Query("言い換え", "症状", ("right",))]
+        rows = [
+            {"mode": "ハイブリッド", "repeat": 1, "query": "型番", "hits": [{"key": "right"}]},
+            {"mode": "ハイブリッド", "repeat": 1, "query": "症状",
+             "hits": [{"key": "right"}, {"key": "other"}]},
+        ]
+        expected_request = {
+            "indexArn": INDEX_ARN,
+            "topK": 5,
+            "queryTexts": [{"metadataKey": "body", "text": "症状"}],
+            "queryVector": {"float32": VECTOR},
+            "returnScores": True,
+            "filter": {"category": {"$eq": "coffee"}},
+        }
+        for keys in (["right"], ["right", "other"]):
+            with self.subTest(keys=keys), Stubber(stub_client()) as stub:
+                stub.add_response(
+                    "query_vectors", {"vectors": [{"key": key} for key in keys], "distanceMetric": "cosine"},
+                    expected_request,
+                )
+                if "other" in keys:
+                    with self.assertRaisesRegex(RuntimeError, "Metadata filter returned invalid hits"):
+                        check_filter(stub.client, INDEX_ARN, corpus, queries, [VECTOR] * 2, rows)
+                else:
+                    result = check_filter(stub.client, INDEX_ARN, corpus, queries, [VECTOR] * 2, rows)
+                    self.assertEqual(result["unfiltered_keys"], ["right", "other"])
+                    self.assertEqual(result["keys"], ["right"])
+                stub.assert_no_pending_responses()
 
 
 if __name__ == "__main__":
