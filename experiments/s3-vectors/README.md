@@ -53,13 +53,19 @@ AWSで計測する場合は、利用する個人アカウント、東京リー�
 `AWS_PROFILE` と `AWS_ACCOUNT_ID` には使用するプロファイルと12桁のアカウントIDを設定します。
 2026年11月20日の計測は公開単価で約0.0008 USDでした。 [S3 Vectorsの料金](https://aws.amazon.com/s3/pricing/#S3_Vectors) · [東京リージョンの当時の単価](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/20261120022349/ap-northeast-1/index.json)
 
+プロファイルには `s3vectors:` の以下の権限が必要です。
+
+- バケットとインデックスの管理 `CreateVectorBucket`、`GetVectorBucket`、`DeleteVectorBucket`、`CreateIndex`、`GetIndex`、`DeleteIndex`
+- 投入と検索 `PutVectors`、`QueryVectors`、`GetVectors`
+
+全文検索とメタデータ絞り込みには `QueryVectors` と `GetVectors` の両方が必要です。 [QueryVectorsの権限](https://docs.aws.amazon.com/cli/latest/reference/s3vectors/query-vectors.html#description)
+
 ```sh
 uv run --locked --extra embedding experiment.py --live --profile "$AWS_PROFILE" --expected-account "$AWS_ACCOUNT_ID"
 ```
 
 既定は3周で最大136検索です。 `--repeats` で変更できます（最大6周）。SDKの自動再試行は無効です。
 STSでアカウントを照合してから、専用のバケットとインデックスを各1個作成します。
-プロファイルには作成、削除、取得、ベクトル投入と検索の権限が必要です。 [S3 VectorsのIAMアクション](https://docs.aws.amazon.com/service-authorization/latest/reference/list_s3vectors.html)
 
 計測結果は `results/` にJSONとMarkdownで保存します。
 終了時に専用のインデックスとバケットを削除し、確認できたら `Confirmed deleted` を表示します。
