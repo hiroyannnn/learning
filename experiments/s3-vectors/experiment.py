@@ -19,6 +19,7 @@ from botocore.config import Config
 from botocore.exceptions import (
     BotoCoreError,
     ClientError,
+    CredentialRetrievalError,
     NoCredentialsError,
     ParamValidationError,
     PartialCredentialsError,
@@ -37,12 +38,22 @@ TOP_K = 5
 MAX_QUERIES = 300
 MAX_LOGICAL_BYTES = 256 * 1024
 RESULTS = Path(__file__).resolve().parent / "results"
-AMBIGUOUS_CREATE_ERRORS = {
-    "RequestTimeoutException",
-    "InternalServerException",
-    "ServiceUnavailableException",
+DEFINITE_AWS_REJECTIONS = {
+    "AccessDenied",
+    "AccessDeniedException",
+    "ConflictException",
+    "ExpiredToken",
+    "ExpiredTokenException",
+    "InvalidAccessKeyId",
+    "InvalidClientTokenId",
+    "InvalidSignatureException",
+    "NotFoundException",
+    "ServiceQuotaExceededException",
+    "SignatureDoesNotMatch",
+    "TooManyRequestsException",
+    "UnrecognizedClientException",
+    "ValidationException",
 }
-AMBIGUOUS_HTTP_STATUSES = {408, 500, 502, 503, 504}
 CREATE_LOOKUP_DELAYS = (0, 1, 2)
 
 
@@ -251,13 +262,11 @@ def resource_exists(lookup):
 
 
 def uncertain_aws_response(error):
-    if isinstance(error, (NoCredentialsError, ParamValidationError, PartialCredentialsError)):
+    if isinstance(
+        error, (CredentialRetrievalError, NoCredentialsError, ParamValidationError, PartialCredentialsError)
+    ):
         return False
-    if not isinstance(error, ClientError):
-        return True
-    code = error.response["Error"]["Code"]
-    status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-    return code in AMBIGUOUS_CREATE_ERRORS or status in AMBIGUOUS_HTTP_STATUSES
+    return not isinstance(error, ClientError) or error.response["Error"]["Code"] not in DEFINITE_AWS_REJECTIONS
 
 
 def cleanup_resource(arn, delete, preceding_error=None):
@@ -342,7 +351,18 @@ def aws_session(profile, expected_account):
         read_timeout=15,
         ignore_configured_endpoint_urls=True,
     )
-    session = boto3.Session(profile_name=profile, region_name=REGION)
+    profile_session = boto3.Session(profile_name=profile, region_name=REGION)
+    credentials = profile_session.get_credentials()
+    if credentials is None:
+        raise NoCredentialsError()
+    verified_credentials = credentials.get_frozen_credentials()
+    session = boto3.Session(
+        profile_name=profile,
+        region_name=REGION,
+        aws_access_key_id=verified_credentials.access_key,
+        aws_secret_access_key=verified_credentials.secret_key,
+        aws_session_token=verified_credentials.token,
+    )
     account = session.client("sts", config=config).get_caller_identity()["Account"]
     if account != expected_account:
         raise ValueError("STS account differs from --expected-account. No resources were created.")

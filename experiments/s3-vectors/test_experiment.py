@@ -126,6 +126,30 @@ class ExperimentTests(unittest.TestCase):
             session.return_value.client.assert_called_once()
             self.assertEqual(session.return_value.client.call_args.args, ("sts",))
 
+    def test_sts_and_vectors_use_the_same_frozen_credentials(self):
+        source = Mock()
+        credentials = source.get_credentials.return_value
+        credentials.get_frozen_credentials.return_value = SimpleNamespace(
+            access_key="test-key", secret_key="test-secret", token="test-token"
+        )
+        verified = Mock()
+        sts = Mock()
+        sts.get_caller_identity.return_value = {"Account": ACCOUNT}
+        vectors = Mock()
+        verified.client.side_effect = [sts, vectors]
+        with patch("experiment.boto3.Session", side_effect=[source, verified]) as session:
+            self.assertIs(aws_session("test", ACCOUNT), vectors)
+
+        credentials.get_frozen_credentials.assert_called_once()
+        self.assertEqual(session.call_args_list, [
+            call(profile_name="test", region_name=REGION),
+            call(
+                profile_name="test", region_name=REGION, aws_access_key_id="test-key",
+                aws_secret_access_key="test-secret", aws_session_token="test-token",
+            ),
+        ])
+        self.assertEqual([entry.args[0] for entry in verified.client.call_args_list], ["sts", "s3vectors"])
+
     def test_cleans_up_bucket_after_create_response_times_out(self):
         client = Mock()
         client.create_vector_bucket.side_effect = ReadTimeoutError(endpoint_url="https://test")
@@ -229,13 +253,17 @@ class ExperimentTests(unittest.TestCase):
                     self.fail("measurement started after a TLS error")
         client.delete_vector_bucket.assert_called_once_with(vectorBucketArn=BUCKET_ARN)
 
-    def test_reconciles_bucket_after_sdk_cannot_decode_create_response(self):
-        for malformed, exception in ((b"\xff", UnicodeDecodeError), (b"[]", AttributeError)):
-            with self.subTest(malformed=malformed):
+    def test_reconciles_bucket_after_ambiguous_sdk_response(self):
+        for status, body, exception in (
+            (504, b"\xff", UnicodeDecodeError),
+            (504, b"[]", AttributeError),
+            (524, b'{"message":"gateway timeout"}', ClientError),
+        ):
+            with self.subTest(status=status, body=body):
                 client = stub_client()
                 responses = []
                 for status, body, headers in (
-                    (504, malformed, {}),
+                    (status, body, {}),
                     (200, b'{"vectorBucket":{}}', {}),
                     (200, b"{}", {}),
                     (404, b'{"message":"missing"}', {"x-amzn-errortype": "NotFoundException"}),

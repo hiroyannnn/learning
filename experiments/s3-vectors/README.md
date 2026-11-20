@@ -36,11 +36,11 @@ bash run_emulator_test.sh
 
 Emulator v1.0.533 の `QueryVectors` はベクトル距離で順位付けする。全文とハイブリッドのリクエスト・集計はスタブで検証し、日本語の全文検索・RRFの順位・応答時間は東京リージョンの実測を参照する。 [AWS Emulatorの利用手順](https://docs.aws.amazon.com/emulator/latest/userguide/getting-started-docker.html) · [固定版の検索実装](https://github.com/aws/aws-emulator/blob/v1.0.533/services/service-com-amazonaws-s3vectors-s3vectors/src/ops/query_vectors.rs)
 
-2026年11月20日、Apple Silicon の macOS でSDKテスト14件と Docker 統合テスト1件が成功した。
+2026年11月20日、Apple Silicon の macOS でSDKテスト15件と Docker 統合テスト1件が成功した。
 
 ## AWSで計測する
 
-利用する個人アカウントと費用を確認・承認してから実行する。`AWS_PROFILE` と `AWS_ACCOUNT_ID` には、確認済みのプロファイルとアカウントIDを設定する。リージョンは `ap-northeast-1` 固定で、STS の照会結果が期待するアカウントIDと一致した場合に、その実行専用のベクトルバケットとインデックスを各1個作成する。
+利用する個人アカウントと費用を確認・承認してから実行する。`AWS_PROFILE` と `AWS_ACCOUNT_ID` には、確認済みのプロファイルとアカウントIDを設定する。リージョンは `ap-northeast-1` 固定。プロファイルから取得した同じ認証情報をSTS照合とS3 Vectorsの操作に使い、期待するアカウントIDに一致した場合に専用バケットとインデックスを各1個作成する。
 
 ```sh
 uv run --locked --extra embedding experiment.py --live --profile "$AWS_PROFILE" --expected-account "$AWS_ACCOUNT_ID"
