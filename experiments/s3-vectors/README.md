@@ -3,6 +3,8 @@
 日本語の架空FAQ100件を使い、同じ S3 Vectors インデックスで全文検索、ベクトル検索、ハイブリッド検索の順位と応答時間を比較します。
 データと正解は [fixtures.py](fixtures.py) にあります。
 
+構成図や実装コードの抜粋はZennの記事にまとめました。 [S3 Vectorsで日本語FAQ検索を試したメモ](https://zenn.dev/hiroyannnn/articles/s3-vectors-japanese-faq-search)
+
 ## ローカルで試す
 
 Python 3.12 と [uv](https://docs.astral.sh/uv/) を用意し、リポジトリのルートから実行します。
