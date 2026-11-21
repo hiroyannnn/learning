@@ -1,0 +1,13 @@
+[project]
+name = "learning-s3-vectors"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["boto3==1.44.7"]
+
+[project.optional-dependencies]
+embedding = [
+    "sentence-transformers==5.2.3",
+]
+
+[tool.uv]
+package = false
